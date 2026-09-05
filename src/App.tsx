@@ -25,13 +25,13 @@ const explorationGuidance: Record<Campaign["explorationStep"], { title: string; 
 
 export function App() {
   const [campaign, setCampaign] = useState(loadCampaign);
-  const [activeTab, setActiveTab] = useState<"explore" | "combat" | "character" | "inventory" | "journal">("explore");
+  const [activeTab, setActiveTab] = useState<"explore" | "combat" | "character" | "inventory" | "journal">(campaign.characterCreated ? "explore" : "character");
   const [showGuide, setShowGuide] = useState(true);
   const [rollMessage, setRollMessage] = useState("");
 
   useEffect(() => saveCampaign(campaign), [campaign]);
   const currentRoom = campaign.rooms.find((room) => room.id === campaign.currentRoomId)!;
-  const guide = activeTab === "explore" ? explorationGuidance[campaign.explorationStep] : activeTab === "combat" ? { title:`Round ${campaign.combat.round}: ${campaign.combat.actingSide} acts`, text:"Resolve an opposed check, apply damage when required, then change the acting side. Reactions reset at the next round.", page:"75–87" } : guidance[campaign.phase];
+  const guide = !campaign.characterCreated ? { title:"Create your Gravebound", text:"Name your character, record why they entered Ker Nethalas, assign the listed skill allotments and set resistances to 40 / 20 / 20. Every requirement turns green when complete.", page:"19–20" } : activeTab === "explore" ? explorationGuidance[campaign.explorationStep] : activeTab === "combat" ? { title:`Round ${campaign.combat.round}: ${campaign.combat.actingSide} acts`, text:"Resolve an opposed check, apply damage when required, then change the acting side. Reactions reset at the next round.", page:"75–87" } : guidance[campaign.phase];
 
   function changeResource(key: ResourceKey, delta: number) { setCampaign((value) => updateResource(value, key, delta)); }
   function travel(direction: Direction, entryType: "passage" | "door") { setCampaign((value) => addRoom(value, direction, entryType)); setShowGuide(true); }
@@ -57,7 +57,7 @@ export function App() {
 
   return <main className="app-shell">
     <header className="masthead">
-      <div><p className="eyebrow">GRAVEBOUND COMPANION · v0.5</p><h1>{campaign.domainName}</h1><p>{campaign.characterName} · Room {currentRoom.number}</p></div>
+      <div><p className="eyebrow">GRAVEBOUND COMPANION · v0.5.2</p><h1>{campaign.domainName}</h1><p>{campaign.characterName} · Room {currentRoom.number}</p></div>
       <div className="save-tools"><span className="saved">◆ Autosaved</span><button onClick={exportSave}>Export</button><button onClick={reset}>New campaign</button></div>
     </header>
 
@@ -67,15 +67,15 @@ export function App() {
     </section>
 
     <nav className="tabs">
-      {(["explore", "combat", "character", "inventory", "journal"] as const).map((tab) => <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>{tab}</button>)}
+      {(["explore", "combat", "character", "inventory", "journal"] as const).map((tab) => <button key={tab} disabled={!campaign.characterCreated && tab !== "character"} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>{tab}</button>)}
       <button className="guide-button" onClick={() => setShowGuide((value) => !value)}>✦ What do I do now?</button>
     </nav>
 
-    {showGuide && <aside className="guidance"><div><span>NEXT PROCEDURE</span><h2>{guide.title}</h2><p>{guide.text}</p></div><div className="guidance-actions">{activeTab === "explore" && campaign.explorationStep !== "combat" && campaign.explorationStep !== "ready" ? <button onClick={() => setCampaign(resolveExplorationRoll(campaign))}>Roll & continue</button> : activeTab === "explore" && campaign.explorationStep === "combat" ? <button onClick={() => setActiveTab("combat")}>Open combat dashboard</button> : <button onClick={() => setCampaign((value) => ({ ...value, phase: value.phase === "enter" ? "resolve" : "explore" }))}>Mark step resolved</button>}<small>Reference: pages {guide.page}</small></div></aside>}
+    {showGuide && <aside className="guidance"><div><span>NEXT PROCEDURE</span><h2>{guide.title}</h2><p>{guide.text}</p></div><div className="guidance-actions">{!campaign.characterCreated ? <small>Complete the checklist below<br/>Reference: pages {guide.page}</small> : <>{activeTab === "explore" && campaign.explorationStep !== "combat" && campaign.explorationStep !== "ready" ? <button onClick={() => setCampaign(resolveExplorationRoll(campaign))}>Roll & continue</button> : activeTab === "explore" && campaign.explorationStep === "combat" ? <button onClick={() => setActiveTab("combat")}>Open combat dashboard</button> : <button onClick={() => setCampaign((value) => ({ ...value, phase: value.phase === "enter" ? "resolve" : "explore" }))}>Mark step resolved</button>}<small>Reference: pages {guide.page}</small></>}</div></aside>}
 
     {activeTab === "explore" && <Explore campaign={campaign} currentRoom={currentRoom} onTravel={travel} onUpdate={setCampaign} />}
     {activeTab === "combat" && <Combat campaign={campaign} onUpdate={setCampaign} onFinish={() => { setCampaign(log({ ...campaign, combat:{...campaign.combat,active:false,reactions:0}, explorationStep:"ready", rooms:campaign.rooms.map(room=>room.id===campaign.currentRoomId?{...room,hasEncounter:false,state:"cleared"}:room) },"Combat resolved; room cleared.")); setActiveTab("explore"); }} />}
-    {activeTab === "character" && <Character campaign={campaign} onUpdate={setCampaign} />}
+    {activeTab === "character" && <Character campaign={campaign} onUpdate={setCampaign} onComplete={() => { setActiveTab("explore"); setShowGuide(true); }} />}
     {activeTab === "inventory" && <Inventory campaign={campaign} onUpdate={setCampaign} />}
     {activeTab === "journal" && <Journal campaign={campaign} />}
   </main>;
@@ -111,7 +111,7 @@ function Explore({ campaign, currentRoom, onTravel, onUpdate }: { campaign: Camp
   </section>;
 }
 
-function Character({ campaign, onUpdate }: { campaign: Campaign; onUpdate: (campaign: Campaign) => void }) {
+function Character({ campaign, onUpdate, onComplete }: { campaign: Campaign; onUpdate: (campaign: Campaign) => void; onComplete: () => void }) {
   const [modifier, setModifier] = useState(0);
   const [mode, setMode] = useState<CheckMode>("normal");
   const setup = validateCharacterSetup(campaign);
@@ -136,7 +136,7 @@ function Character({ campaign, onUpdate }: { campaign: Campaign; onUpdate: (camp
       <div className="skill-list">{campaign.skills.map(skill => <div className="skill-row" key={skill.id}><div><strong>{skill.name}</strong><small>{skill.category} · starts {skill.startingBase}{skill.markedForImprovement ? " · MARKED" : ""}</small></div><label>{campaign.characterCreated ? "Base" : "Allot"}{campaign.characterCreated ? <input type="number" min="0" max="80" value={skill.base} onChange={event => updateSkill(skill.id, { base: Math.min(80, Math.max(0, Number(event.target.value))) })} /> : <select value={skill.base - skill.startingBase} onChange={event => updateSkill(skill.id, { base: skill.startingBase + Number(event.target.value) })}><option value="0">—</option><option value="10">+10</option><option value="20">+20</option><option value="30">+30</option>{skill.category === "weapon" && <><option value="40">+40</option><option value="60">+60</option></>}</select>}</label><label>Gear<input type="number" step="5" value={skill.gearModifier} onChange={event => updateSkill(skill.id, { gearModifier: Number(event.target.value) })} /></label><strong className="effective">{skill.base + skill.gearModifier}</strong><button onClick={() => roll(skill.id, skill.name, skill.base + skill.gearModifier, true)}>Roll</button></div>)}</div>
     </div>
     <div className="panel resistance-panel"><span>RESISTANCES · PAGE 20</span><h2>Automatic defenses</h2>{Object.entries(campaign.resistances).map(([id, score]) => <div className="resistance" key={id}><strong>{id}</strong><input type="number" min="0" value={score} onChange={event => onUpdate({ ...campaign, resistances: { ...campaign.resistances, [id]: Number(event.target.value) } })}/><button onClick={() => roll(id, id[0].toUpperCase() + id.slice(1), score, false)}>Roll</button></div>)}<p>Assign 40 to one resistance and 20 to the other two during creation.</p></div>
-    <div className="panel creation-rules"><span>STARTING ALLOTMENTS · PAGE 19</span><h2>{campaign.characterCreated ? "Setup complete" : "Character setup"}</h2><ul><li className={setup.summary.weapon60 === 1 ? "done" : ""}>+60 to one weapon skill ({setup.summary.weapon60}/1)</li><li className={setup.summary.weapon40 === 1 ? "done" : ""}>+40 to one weapon skill ({setup.summary.weapon40}/1)</li><li className={setup.summary.thirty === 3 ? "done" : ""}>+30 to three skills ({setup.summary.thirty}/3)</li><li className={setup.summary.twenty === 2 ? "done" : ""}>+20 to two skills ({setup.summary.twenty}/2)</li><li className={setup.summary.ten === 3 ? "done" : ""}>+10 to three skills ({setup.summary.ten}/3)</li><li className={setup.summary.resistances ? "done" : ""}>Resistances assigned 40 / 20 / 20</li></ul>{!campaign.characterCreated && <button className="complete-character" disabled={!setup.valid} onClick={() => onUpdate(log({ ...campaign, characterCreated: true }, `${campaign.characterName} completed character creation.`))}>Complete character</button>}<p>After creation, values remain editable for advancement, equipment, and unusual character options.</p></div>
+    <div className="panel creation-rules"><span>STARTING ALLOTMENTS · PAGE 19</span><h2>{campaign.characterCreated ? "Setup complete" : "Character setup"}</h2><ul><li className={setup.summary.weapon60 === 1 ? "done" : ""}>+60 to one weapon skill ({setup.summary.weapon60}/1)</li><li className={setup.summary.weapon40 === 1 ? "done" : ""}>+40 to one weapon skill ({setup.summary.weapon40}/1)</li><li className={setup.summary.thirty === 3 ? "done" : ""}>+30 to three skills ({setup.summary.thirty}/3)</li><li className={setup.summary.twenty === 2 ? "done" : ""}>+20 to two skills ({setup.summary.twenty}/2)</li><li className={setup.summary.ten === 3 ? "done" : ""}>+10 to three skills ({setup.summary.ten}/3)</li><li className={setup.summary.resistances ? "done" : ""}>Resistances assigned 40 / 20 / 20</li></ul>{!campaign.characterCreated && <button className="complete-character" disabled={!setup.valid} onClick={() => { onUpdate(log({ ...campaign, characterCreated: true, phase:"enter", explorationStep:"shape" }, `${campaign.characterName} completed character creation and began the descent.`)); onComplete(); }}>Complete character & begin descent</button>}<p>After creation, values remain editable for advancement, equipment, and unusual character options.</p></div>
   </section>;
 }
 const EQUIPMENT_SLOTS: EquipmentSlot[] = ["mainHand","offHand","belt","head","armor","gloves","boots","amulet","ring1","ring2","backpack","pouch1","pouch2","pouch3"];
