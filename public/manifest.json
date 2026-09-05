@@ -4,11 +4,11 @@
   "manifest_version": 1,
   "author": "Eric Sortland",
   "description": "An extension-first solo campaign companion for Ker Nethalas.",
-  "icon": "/icon.svg",
+  "icon": "./icon.svg",
   "action": {
     "title": "Open Gravebound Companion",
-    "icon": "/icon.svg",
-    "popover": "/",
+    "icon": "./icon.svg",
+    "popover": "./",
     "height": 700,
     "width": 1200
   }
