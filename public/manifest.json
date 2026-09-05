@@ -1,14 +1,14 @@
 {
   "name": "Ker Nethalas: Gravebound Companion",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "manifest_version": 1,
   "author": "Eric Sortland",
   "description": "An extension-first solo campaign companion for Ker Nethalas.",
-  "icon": "./icon.svg",
+  "icon": "https://esortland.github.io/ker-nethalas-dashboard/icon.svg",
   "action": {
     "title": "Open Gravebound Companion",
-    "icon": "./icon.svg",
-    "popover": "./",
+    "icon": "https://esortland.github.io/ker-nethalas-dashboard/icon.svg",
+    "popover": "https://esortland.github.io/ker-nethalas-dashboard/",
     "height": 700,
     "width": 1200
   }
