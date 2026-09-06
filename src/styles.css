@@ -1,11 +1,11 @@
 :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #e6dcc7; background: #100f0e; font-synthesis: none; }
 * { box-sizing: border-box; }
 html { min-height:100%; scroll-behavior:smooth; }
-body { margin: 0; min-width: 780px; min-height: 100%; overflow-x:hidden; overflow-y:auto; background: radial-gradient(circle at 70% 0%, #2b2220 0, transparent 34%), #100f0e; }
+body { margin: 0; min-width: 0; min-height: 100%; overflow-x:hidden; overflow-y:auto; background: radial-gradient(circle at 70% 0%, #2b2220 0, transparent 34%), #100f0e; }
 button, select, textarea { font: inherit; }
 button { color: inherit; border: 1px solid #574c3b; background: #211e1a; border-radius: 3px; cursor: pointer; }
 button:hover { border-color: #b99e6d; background: #2a251f; }
-.app-shell { width:100%; min-height: 100dvh; padding: 22px; }
+.app-shell { width: min(100%, 1680px); min-height: 100dvh; margin: 0 auto; padding: clamp(14px, 2vw, 28px); }
 .masthead { display: flex; justify-content: space-between; align-items: end; border-bottom: 1px solid #5b4d38; padding: 4px 2px 18px; }
 .masthead h1 { font-family: Georgia, serif; font-weight: 500; margin: 2px 0; letter-spacing: .03em; }
 .masthead p { margin: 0; color: #9e927d; }
