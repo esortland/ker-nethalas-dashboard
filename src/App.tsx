@@ -158,7 +158,9 @@ function PlaySetup({campaign,onUpdate,onComplete}:{campaign:Campaign;onUpdate:(c
 function Explore({ campaign, currentRoom, onTravel, onUpdate }: { campaign: Campaign; currentRoom: DomainRoom; onTravel: (direction: Direction, entryType: "passage" | "door") => void; onUpdate: (campaign: Campaign) => void }) {
   const [entryType, setEntryType] = useState<"passage" | "door">("passage");
   const [deepTensionRoll,setDeepTensionRoll]=useState(1);
-  const [featureRolls,setFeatureRolls]=useState({difficulty:1,trap:1,lock:1});\n  const [mapZoom,setMapZoom]=useState(1);\n  const mapRef=useRef<HTMLDivElement>(null);
+  const [featureRolls,setFeatureRolls]=useState({difficulty:1,trap:1,lock:1});
+  const [mapZoom,setMapZoom]=useState(1);
+  const mapRef=useRef<HTMLDivElement>(null);
   const bounds = useMemo(() => ({ minX: Math.min(...campaign.rooms.map(r => r.x)), minY: Math.min(...campaign.rooms.map(r => r.y)) }), [campaign.rooms]);
   return <section className="workspace">
     <div className="map-panel panel">
