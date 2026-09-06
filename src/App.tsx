@@ -24,6 +24,17 @@ const explorationGuidance: Record<Campaign["explorationStep"], { title: string; 
   ready: { title: "Choose what you do here", text: "You may scavenge once, make one deep search, interact with a feature, set camp when permitted, or leave through an available route.", page: "99 and 116–123" },
 };
 
+function combatGuidance(campaign: Campaign) {
+  const stage = campaign.combat.stage;
+  if (stage === "setup") return { title:"Establish who acts first", text:"Add the encounter, optionally attempt surprise, then oppose Perception against the highest enemy Mind for initiative.", page:"76" };
+  if (stage === "hit-location") return { title:"Determine where the attack landed", text:"Roll on the enemy’s anatomy table, identify its Weak Spot, and record whether this becomes a Critical Strike.", page:"80" };
+  if (stage === "damage") return { title:"Build the Damage Pool", text:"Roll every contributed die, choose one result, add fixed modifiers, then preview Critical Strike, Armor, and damage response.", page:"81–83" };
+  if (stage === "enemy-damage") return { title:"Confirm the enemy action", text:"Enter the action’s damage or effect and confirm whether Armor applies before changing turns.", page:"77, 81–83" };
+  if (stage === "defensive-move") return { title:"Resolve the Defensive Move", text:"Use the table in your book, apply its instruction, then mark the action complete.", page:"75, 77" };
+  if (stage === "recovery") return { title:"Close the fight", text:"Recover d4 Toughness after the fight, then return to the cleared room.", page:"Player Reference p. 2" };
+  return { title:`Round ${campaign.combat.round}: ${campaign.combat.actingSide} acts`, text:campaign.combat.actingSide === "player" ? "Choose an attack or other Standard Action. The dashboard pauses after each resolution step." : "Roll the creature’s Action table, classify the result, and resolve its Physical, Magical, or special instructions.", page:"75–79" };
+}
+
 export function App() {
   const [campaign, setCampaign] = useState(loadCampaign);
   const [activeTab, setActiveTab] = useState<"explore" | "combat" | "character" | "inventory" | "journal">(campaign.characterCreated ? "explore" : "character");
@@ -32,7 +43,7 @@ export function App() {
 
   useEffect(() => saveCampaign(campaign), [campaign]);
   const currentRoom = campaign.rooms.find((room) => room.id === campaign.currentRoomId)!;
-  const guide = !campaign.characterCreated ? { title:"Create your Gravebound", text:"Name your character, record why they entered Ker Nethalas, assign the listed skill allotments and set resistances to 40 / 20 / 20. Every requirement turns green when complete.", page:"19–20" } : activeTab === "explore" ? explorationGuidance[campaign.explorationStep] : activeTab === "combat" ? { title:`Round ${campaign.combat.round}: ${campaign.combat.actingSide} acts`, text:"Resolve an opposed check, apply damage when required, then change the acting side. Reactions reset at the next round.", page:"75–87" } : guidance[campaign.phase];
+  const guide = !campaign.characterCreated ? { title:"Create your Gravebound", text:"Name your character, record why they entered Ker Nethalas, assign the listed skill allotments and set resistances to 40 / 20 / 20. Every requirement turns green when complete.", page:"19–20" } : activeTab === "explore" ? explorationGuidance[campaign.explorationStep] : activeTab === "combat" ? combatGuidance(campaign) : guidance[campaign.phase];
 
   function changeResource(key: ResourceKey, delta: number) { setCampaign((value) => updateResource(value, key, delta)); }
   function travel(direction: Direction, entryType: "passage" | "door") { setCampaign((value) => addRoom(value, direction, entryType)); setShowGuide(true); }
@@ -58,7 +69,7 @@ export function App() {
 
   return <main className="app-shell">
     <header className="masthead">
-      <div><p className="eyebrow">GRAVEBOUND COMPANION · v0.6</p><h1>{campaign.domainName}</h1><p>{campaign.characterName} · Room {currentRoom.number}</p></div>
+      <div><p className="eyebrow">GRAVEBOUND COMPANION · v0.7</p><h1>{campaign.domainName}</h1><p>{campaign.characterName} · Room {currentRoom.number}</p></div>
       <div className="save-tools"><span className="saved">◆ Autosaved</span><button onClick={exportSave}>Export</button><button onClick={reset}>New campaign</button></div>
     </header>
 
@@ -72,11 +83,11 @@ export function App() {
       <button className="guide-button" onClick={() => setShowGuide((value) => !value)}>✦ What do I do now?</button>
     </nav>
 
-    {showGuide && <aside className="guidance"><div><span>NEXT PROCEDURE</span><h2>{guide.title}</h2><p>{guide.text}</p></div><div className="guidance-actions">{!campaign.characterCreated ? <small>Complete the checklist below<br/>Reference: pages {guide.page}</small> : <>{activeTab === "explore" && campaign.explorationStep !== "combat" && campaign.explorationStep !== "ready" ? <button onClick={() => setCampaign(resolveExplorationRoll(campaign))}>Roll & continue</button> : activeTab === "explore" && campaign.explorationStep === "combat" ? <button onClick={() => setActiveTab("combat")}>Open combat dashboard</button> : <button onClick={() => setCampaign((value) => ({ ...value, phase: value.phase === "enter" ? "resolve" : "explore" }))}>Mark step resolved</button>}<small>Reference: pages {guide.page}</small></>}</div></aside>}
+    {showGuide && <aside className="guidance"><div><span>NEXT PROCEDURE</span><h2>{guide.title}</h2><p>{guide.text}</p></div><div className="guidance-actions">{!campaign.characterCreated ? <small>Complete the checklist below<br/>Reference: pages {guide.page}</small> : <>{activeTab === "explore" && campaign.explorationStep !== "combat" && campaign.explorationStep !== "ready" ? <button onClick={() => setCampaign(resolveExplorationRoll(campaign))}>Roll & continue</button> : activeTab === "explore" && campaign.explorationStep === "combat" ? <button onClick={() => setActiveTab("combat")}>Open combat dashboard</button> : activeTab !== "combat" ? <button onClick={() => setCampaign((value) => ({ ...value, phase: value.phase === "enter" ? "resolve" : "explore" }))}>Mark step resolved</button> : null}<small>Reference: pages {guide.page}</small></>}</div></aside>}
 
     <details className="rules-drawer"><summary>Rules quick reference · pages for this screen</summary><div>{QUICK_RULES[activeTab].map(rule=><article key={rule.title}><PageRef pages={rule.page}/><strong>{rule.title}</strong><p>{rule.summary}</p></article>)}</div></details>
     {activeTab === "explore" && <Explore campaign={campaign} currentRoom={currentRoom} onTravel={travel} onUpdate={setCampaign} />}
-    {activeTab === "combat" && <Combat campaign={campaign} onUpdate={setCampaign} onFinish={() => { setCampaign(log({ ...campaign, combat:{...campaign.combat,active:false,reactions:0}, explorationStep:"ready", rooms:campaign.rooms.map(room=>room.id===campaign.currentRoomId?{...room,hasEncounter:false,state:"cleared"}:room) },"Combat resolved; room cleared.")); setActiveTab("explore"); }} />}
+    {activeTab === "combat" && <Combat campaign={campaign} onUpdate={setCampaign} onFinish={(resolved) => { setCampaign(log({ ...resolved, explorationStep:"ready", rooms:resolved.rooms.map(room=>room.id===resolved.currentRoomId?{...room,hasEncounter:false,state:"cleared"}:room) },"Combat resolved; room cleared.")); setActiveTab("explore"); }} />}
     {activeTab === "character" && <Character campaign={campaign} onUpdate={setCampaign} onComplete={() => { setActiveTab("explore"); setShowGuide(true); }} />}
     {activeTab === "inventory" && <Inventory campaign={campaign} onUpdate={setCampaign} />}
     {activeTab === "journal" && <Journal campaign={campaign} />}

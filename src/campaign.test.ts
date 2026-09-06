@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { addFeature, addItem, addRoom, applyDamageToEnemy, applyDamageToPlayer, checkTension, choosePercentile, equipItem, generateAttributes, investigateFeature, inventoryUsage, itemSlots, makeCampaign, nextCombatRound, performCheck, resolveExplorationRoll, resolveOpposed, resolveOutcome, updateResource, validateCharacterSetup } from "./campaign";
+import { addFeature, addItem, addRoom, advanceCombatTurn, applyDamageToEnemy, applyDamageToPlayer, checkTension, choosePercentile, confirmDamageToEnemy, equipItem, establishInitiative, generateAttributes, investigateFeature, inventoryUsage, itemSlots, makeCampaign, nextCombatRound, performCheck, performManualCheck, previewDamage, recoverAfterCombat, resolveExplorationRoll, resolveOpposed, resolveOutcome, updateResource, validateCharacterSetup } from "./campaign";
 
 describe("campaign rules", () => {
   it("clamps resources", () => {
@@ -130,5 +130,61 @@ describe("campaign rules", () => {
     expect(campaign.combat.enemies[0].health).toBe(5);
     campaign.combat.reactions=3;
     expect(nextCombatRound(campaign).combat.reactions).toBe(0);
+  });
+  it("accepts a player-entered percentile roll without rerolling it", () => {
+    const result=performManualCheck("skill:dodge","Dodge",40,-20,22);
+    expect(result.roll).toBe(22);
+    expect(result.target).toBe(20);
+    expect(result.outcome).toBe("fumble");
+    expect(result.canMarkImprovement).toBe(true);
+  });
+  it("retains side-based initiative and resets reactions after both sides act", () => {
+    let campaign=establishInitiative(makeCampaign(),"enemy","enemy");
+    expect(campaign.combat.actingSide).toBe("enemy");
+    expect(campaign.combat.surpriseBonus.enemy).toBe(20);
+    campaign.combat.reactions=2;
+    campaign=advanceCombatTurn(campaign);
+    expect(campaign.combat.actingSide).toBe("player");
+    expect(campaign.combat.surpriseBonus.enemy).toBe(0);
+    expect(campaign.combat.round).toBe(1);
+    campaign=advanceCombatTurn(campaign);
+    expect(campaign.combat.actingSide).toBe("enemy");
+    expect(campaign.combat.round).toBe(2);
+    expect(campaign.combat.reactions).toBe(0);
+  });
+  it("gives every living enemy one turn before changing sides", () => {
+    let campaign=establishInitiative(makeCampaign(),"enemy");
+    campaign.combat.enemies=[
+      {id:"a",name:"A",health:4,maxHealth:4,combat:40,mind:20,armor:0,notes:""},
+      {id:"b",name:"B",health:4,maxHealth:4,combat:40,mind:20,armor:0,notes:""},
+      {id:"dead",name:"Dead",health:0,maxHealth:4,combat:40,mind:20,armor:0,notes:""},
+    ];
+    campaign=advanceCombatTurn(campaign,"a");
+    expect(campaign.combat.actingSide).toBe("enemy");
+    expect(campaign.combat.enemyTurnsTaken).toEqual(["a"]);
+    campaign=advanceCombatTurn(campaign,"b");
+    expect(campaign.combat.actingSide).toBe("player");
+    expect(campaign.combat.round).toBe(1);
+  });
+  it("previews Critical Strike, Armor, and vulnerability in rules order", () => {
+    expect(previewDamage(5,1,true,3,"vulnerable")).toEqual({raw:6,criticalTotal:12,afterArmor:9,final:18});
+    expect(previewDamage(5,1,false,3,"resistant").final).toBe(1);
+    expect(previewDamage(5,1,false,3,"immune").final).toBe(0);
+  });
+  it("confirms calculated damage without applying Armor twice", () => {
+    let campaign=makeCampaign();
+    campaign.combat.enemies=[{id:"e",name:"Wretch",health:20,maxHealth:20,combat:40,mind:20,armor:3,notes:""}];
+    campaign=confirmDamageToEnemy(campaign,"e",5,1,true,"vulnerable");
+    expect(campaign.combat.enemies[0].health).toBe(2);
+  });
+  it("recovers d4 Toughness after combat and resets the guided flow", () => {
+    let campaign=makeCampaign();
+    campaign.resources.toughness.current=10;
+    campaign.combat={...campaign.combat,active:true,stage:"recovery",round:4,enemies:[{id:"e",name:"Wretch",health:0,maxHealth:8,combat:40,mind:20,armor:0,notes:""}]};
+    campaign=recoverAfterCombat(campaign,4);
+    expect(campaign.resources.toughness.current).toBe(14);
+    expect(campaign.combat.active).toBe(false);
+    expect(campaign.combat.stage).toBe("setup");
+    expect(campaign.combat.enemies).toEqual([]);
   });
 });

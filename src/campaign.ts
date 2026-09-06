@@ -1,6 +1,8 @@
-import type { AttributeRolls, Campaign, CheckMode, CheckOutcome, CheckResult, Direction, DomainRoom, Enemy, EquipmentSlot, ExplorationStep, Item, OpposedResult, ResourceKey, Skill } from "./types";
+import type { AttributeRolls, Campaign, CheckMode, CheckOutcome, CheckResult, CombatSide, CombatState, Direction, DomainRoom, Enemy, EquipmentSlot, ExplorationStep, Item, OpposedResult, ResourceKey, Skill } from "./types";
 
 export const STORAGE_KEY = "com.esortland.ker-nethalas/campaigns-v1";
+
+export const freshCombat = (): CombatState => ({ active: false, round: 1, actingSide: "player", reactions: 0, enemyTurnsTaken: [], enemies: [], stage: "setup", surpriseAttempted: false, initiativePenalty: 0, surpriseBonus: { player: 0, enemy: 0 }, log: [] });
 
 export const DEFAULT_SKILLS: Skill[] = [
   ["acrobatics", "Acrobatics", "general", 10], ["athletics", "Athletics", "general", 10],
@@ -16,7 +18,7 @@ export function makeCampaign(): Campaign {
   const now = new Date().toISOString();
   const room: DomainRoom = { id: crypto.randomUUID(), number: 1, x: 0, y: 0, state: "entered", notes: "", tags: [], kind: "unknown", entryType: "passage", description: "", hasEncounter: false, eventDescription: "", scavengeUsed: false, deepSearchUsed: false, feature: { trapped: false, locked: false, resolved: true, type: "none" } };
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     id: crypto.randomUUID(),
     name: "The First Descent",
     characterName: "Unnamed Gravebound",
@@ -50,7 +52,7 @@ export function makeCampaign(): Campaign {
       { id: crypto.randomUUID(), name: "Ration", quantity: 1, weight: "light", kind: "consumable", traits: [], notes: "Reduce Exhaustion by 1", twoHanded: false, armor: 0 }
     ],
     equipment: {},
-    combat: { active: false, round: 1, actingSide: "player", reactions: 0, enemies: [], log: [] },
+    combat: freshCombat(),
     rooms: [room],
     currentRoomId: room.id,
     phase: "enter",
@@ -66,7 +68,8 @@ export function loadCampaign(): Campaign {
   if (!raw) return makeCampaign();
   try {
     const parsed = JSON.parse(raw) as Campaign & { schemaVersion: number };
-    if (parsed.schemaVersion === 6) return parsed;
+    if (parsed.schemaVersion === 7) return parsed;
+    if (parsed.schemaVersion === 6) return migrateV6(parsed);
     if (parsed.schemaVersion === 5) return migrateV5(parsed);
     if (parsed.schemaVersion === 4) return migrateV4(parsed);
     if (parsed.schemaVersion === 3) return migrateV3(parsed);
@@ -104,10 +107,14 @@ function migrateV4(old: any): Campaign {
 }
 
 function migrateV5(old: any): Campaign {
-  return { ...old, schemaVersion: 6, attributesGenerated: old.characterCreated, masteries: old.masteries ?? [
+  return migrateV6({ ...old, schemaVersion: 6, attributesGenerated: old.characterCreated, masteries: old.masteries ?? [
     { id: crypto.randomUUID(), name: "Legacy Mastery 1", feature: "Record from character sheet", tierOneAbility: "Record from character sheet" },
     { id: crypto.randomUUID(), name: "Legacy Mastery 2", feature: "Record from character sheet", tierOneAbility: "Record from character sheet" },
-  ] };
+  ] });
+}
+
+function migrateV6(old: any): Campaign {
+  return { ...old, schemaVersion: 7, combat: { ...freshCombat(), ...(old.combat ?? {}), stage: old.combat?.active ? "turn" : "setup", initiativeSide: old.combat?.active ? old.combat?.actingSide ?? "player" : undefined, enemyTurnsTaken: [], surpriseAttempted: false, initiativePenalty: 0, surpriseBonus: { player: 0, enemy: 0 } } };
 }
 
 export function saveCampaign(campaign: Campaign) {
@@ -302,6 +309,14 @@ export function performCheck(subjectId: string, subjectName: string, score: numb
   return { id: crypto.randomUUID(), subjectId, subjectName, mode, rawDigits, roll, target, modifier, outcome, canMarkImprovement: subjectId.startsWith("skill:") && (roll === 100 || roll % 11 === 0) };
 }
 
+export function performManualCheck(subjectId: string, subjectName: string, score: number, modifier: number, roll: number): CheckResult {
+  const normalized = Math.max(1, Math.min(100, Math.round(roll)));
+  const target = Math.max(0, score + modifier);
+  const tens = normalized === 100 ? 0 : Math.floor(normalized / 10);
+  const ones = normalized === 100 ? 0 : normalized % 10;
+  return { id: crypto.randomUUID(), subjectId, subjectName, mode: "normal", rawDigits: [tens, ones], roll: normalized, target, modifier, outcome: resolveOutcome(normalized, target), canMarkImprovement: subjectId.startsWith("skill:") && (normalized === 100 || normalized % 11 === 0) };
+}
+
 const rank = (outcome: CheckOutcome) => outcome === "critical-success" ? 3 : outcome === "success" ? 2 : outcome === "failure" ? 1 : 0;
 export function resolveOpposed(attacker: CheckResult, defender: CheckResult): OpposedResult {
   const bothFailed = rank(attacker.outcome) < 2 && rank(defender.outcome) < 2;
@@ -319,7 +334,7 @@ export function playerArmor(campaign: Campaign) {
 }
 
 export function addEnemy(campaign: Campaign, enemy: Omit<Enemy, "id">): Campaign {
-  return { ...campaign, combat: { ...campaign.combat, active: true, enemies: [...campaign.combat.enemies, { ...enemy, id: crypto.randomUUID() }] } };
+  return { ...campaign, combat: { ...campaign.combat, active: true, stage: campaign.combat.active ? campaign.combat.stage : "setup", enemies: [...campaign.combat.enemies, { ...enemy, id: crypto.randomUUID() }] } };
 }
 
 export function applyDamageToPlayer(campaign: Campaign, damage: number, armor = playerArmor(campaign), unmitigated = false): Campaign {
@@ -336,7 +351,45 @@ export function applyDamageToEnemy(campaign: Campaign, id: string, damage: numbe
 }
 
 export function nextCombatRound(campaign: Campaign): Campaign {
-  return { ...campaign, combat: { ...campaign.combat, round: campaign.combat.round + 1, reactions: 0, actingSide: "player" } };
+  return { ...campaign, combat: { ...campaign.combat, round: campaign.combat.round + 1, reactions: 0, enemyTurnsTaken: [], actingSide: campaign.combat.initiativeSide ?? "player", stage: "turn", pending: undefined } };
+}
+
+export function establishInitiative(campaign: Campaign, side: CombatSide, surpriseSide?: CombatSide): Campaign {
+  return log({ ...campaign, combat: { ...campaign.combat, active: true, round: 1, actingSide: side, initiativeSide: side, reactions: 0, enemyTurnsTaken: [], stage: "turn", initiativePenalty: 0, surpriseBonus: { player: surpriseSide === "player" ? 20 : 0, enemy: surpriseSide === "enemy" ? 20 : 0 }, pending: undefined } }, `${side === "player" ? "Gravebound" : "Enemies"} won initiative${surpriseSide ? `; ${surpriseSide} side has surprise` : ""}.`);
+}
+
+export function advanceCombatTurn(campaign: Campaign, actingEnemyId?: string): Campaign {
+  const initiativeSide = campaign.combat.initiativeSide ?? "player";
+  let enemyTurnsTaken = campaign.combat.enemyTurnsTaken;
+  if (campaign.combat.actingSide === "enemy" && actingEnemyId) enemyTurnsTaken = [...new Set([...enemyTurnsTaken, actingEnemyId])];
+  const remainingEnemies = campaign.combat.enemies.filter(enemy => enemy.health > 0 && !enemyTurnsTaken.includes(enemy.id));
+  if (campaign.combat.actingSide === "enemy" && remainingEnemies.length > 0) return { ...campaign, combat: { ...campaign.combat, enemyTurnsTaken, stage:"turn", pending:undefined, surpriseBonus:{...campaign.combat.surpriseBonus,enemy:0} } };
+  const actingSide: CombatSide = campaign.combat.actingSide === "player" ? "enemy" : "player";
+  const roundComplete = actingSide === initiativeSide;
+  return { ...campaign, combat: { ...campaign.combat, actingSide, enemyTurnsTaken: roundComplete ? [] : enemyTurnsTaken, round: roundComplete ? campaign.combat.round + 1 : campaign.combat.round, reactions: roundComplete ? 0 : campaign.combat.reactions, stage: "turn", pending: undefined, surpriseBonus: { ...campaign.combat.surpriseBonus, [campaign.combat.actingSide]: 0 } } };
+}
+
+export type DamageResponse = "normal" | "vulnerable" | "resistant" | "immune";
+export function previewDamage(rolled: number, fixed: number, critical: boolean, armor: number, response: DamageResponse = "normal") {
+  const raw = Math.max(0, rolled + fixed);
+  const criticalTotal = critical ? raw * 2 : raw;
+  const afterArmor = Math.max(0, criticalTotal - Math.max(0, armor));
+  const final = response === "vulnerable" ? afterArmor * 2 : response === "resistant" ? Math.floor(afterArmor / 2) : response === "immune" ? 0 : afterArmor;
+  return { raw, criticalTotal, afterArmor, final };
+}
+
+export function confirmDamageToEnemy(campaign: Campaign, id: string, rolled: number, fixed: number, critical: boolean, response: DamageResponse = "normal"): Campaign {
+  const enemy = campaign.combat.enemies.find(value => value.id === id);
+  if (!enemy) return campaign;
+  const damage = previewDamage(rolled, fixed, critical, enemy.armor, response);
+  return log({ ...campaign, combat: { ...campaign.combat, enemies: campaign.combat.enemies.map(value => value.id === id ? { ...value, health: Math.max(0, value.health - damage.final) } : value) } }, `${enemy.name} takes ${damage.final} damage (${damage.criticalTotal} before Armor; ${response}).`);
+}
+
+export function recoverAfterCombat(campaign: Campaign, roll: number): Campaign {
+  const amount = Math.max(1, Math.min(4, Math.round(roll)));
+  const before = campaign.resources.toughness.current;
+  const recovered = Math.min(amount, campaign.resources.toughness.max - before);
+  return log({ ...updateResource(campaign, "toughness", amount), combat: { ...campaign.combat, active: false, stage: "setup", round: 1, reactions: 0, enemyTurnsTaken: [], pending: undefined, lastOpposed: undefined, initiativeSide: undefined, surpriseAttempted: false, initiativePenalty: 0, surpriseBonus: { player: 0, enemy: 0 }, enemies: [] } }, `Combat ended; recovered ${recovered} Toughness (d4 roll ${amount}).`);
 }
 
 export function validateCharacterSetup(campaign: Campaign) {

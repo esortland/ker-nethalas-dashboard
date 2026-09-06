@@ -15,10 +15,12 @@ export const QUICK_RULES: Record<"explore"|"combat"|"character"|"inventory"|"jou
   ],
   combat: [
     { title:"Initiative", page:"76", summary:"Oppose Perception against the highest enemy Mind; surprise uses Stealth against Mind." },
+    { title:"Failed surprise", page:"76", summary:"If your surprise attempt fails, make the following initiative check with −20 Perception." },
     { title:"Attack", page:"75, 77", summary:"The attacker receives +10. Compare the attacker and defender as an opposed check." },
     { title:"Weapon Speed", page:"79", summary:"Subtract weapon Speed from the target’s combat Skill while attacking." },
     { title:"Hit and damage", page:"80–83", summary:"Roll hit location, check the Weak Spot, roll the Damage Pool, choose one die, then apply Armor." },
     { title:"Reactions", page:"76–77", summary:"Each Reaction after the first suffers a cumulative −20 until the next round." },
+    { title:"Fight recovery", page:"Player Reference p. 2", summary:"Recover d4 Toughness after every fight, up to the character’s maximum." },
   ],
   inventory: [
     { title:"Encumbrance", page:"206", summary:"Equipped items do not consume carried slots; light items bundle by ten and coins by one hundred." },

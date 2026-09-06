@@ -59,7 +59,31 @@ export interface CheckResult {
 }
 export interface Enemy { id: string; name: string; health: number; maxHealth: number; combat: number; mind: number; armor: number; notes: string }
 export interface OpposedResult { attacker: CheckResult; defender: CheckResult; winner: "attacker" | "defender" | "tie"; bothFailed: boolean }
-export interface CombatState { active: boolean; round: number; actingSide: "player" | "enemy"; reactions: number; enemies: Enemy[]; lastOpposed?: OpposedResult; log: string[] }
+export type CombatSide = "player" | "enemy";
+export type CombatStage = "setup" | "turn" | "hit-location" | "damage" | "defensive-move" | "enemy-damage" | "recovery";
+export interface PendingCombatResolution {
+  kind: "player-hit" | "enemy-hit" | "player-defended" | "enemy-defended";
+  targetId?: string;
+  critical: boolean;
+  location?: string;
+  weakSpot?: boolean;
+}
+export interface CombatState {
+  active: boolean;
+  round: number;
+  actingSide: CombatSide;
+  initiativeSide?: CombatSide;
+  reactions: number;
+  enemyTurnsTaken: string[];
+  enemies: Enemy[];
+  stage: CombatStage;
+  surpriseAttempted: boolean;
+  initiativePenalty: number;
+  surpriseBonus: Record<CombatSide, number>;
+  pending?: PendingCombatResolution;
+  lastOpposed?: OpposedResult;
+  log: string[];
+}
 export type ItemWeight = "none" | "light" | "normal" | "heavy" | "coins";
 export type EquipmentSlot = "mainHand" | "offHand" | "belt" | "head" | "armor" | "gloves" | "boots" | "amulet" | "ring1" | "ring2" | "backpack" | "pouch1" | "pouch2" | "pouch3";
 export interface Item {
@@ -70,7 +94,7 @@ export interface Item {
 }
 
 export interface Campaign {
-  schemaVersion: 6;
+  schemaVersion: 7;
   id: string;
   name: string;
   characterName: string;

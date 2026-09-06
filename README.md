@@ -2,7 +2,7 @@
 
 An extension-first solo campaign companion. The application owns campaign state and the internal Domain map; Owlbear Rodeo is a host rather than a gameplay dependency.
 
-## Milestone 0.6
+## Milestone 0.7
 
 - Persistent versioned campaign state
 - Core resource controls
@@ -58,6 +58,19 @@ An extension-first solo campaign companion. The application owns campaign state 
 - Contextual quick-reference drawer with source page numbers
 - Versioned rule-reference registry ready for selective table digitization
 - Automatic migration of v0.5 campaign saves
+- Player-rolled or digital combat checks throughout the guided flow
+- Optional surprise attempt and failed-surprise initiative penalty
+- Side-based initiative order retained across combat rounds
+- Guided Physical, Magical, and special enemy Action resolution
+- Targeted Weak Spot attacks with automatic Disadvantage
+- Hit-location recording without reproducing the authored lookup table
+- Defensive Move pause and result recording
+- Step-by-step damage preview: fixed modifiers, Critical Strike, Armor, and response
+- Vulnerable, Resistant, and Immune damage calculations
+- Optional +1 melee damage for 2 Exhaustion
+- Confirm-before-apply incoming damage
+- Mandatory post-fight d4 Toughness recovery before clearing the room
+- Persistent guided combat stage with automatic migration of v0.6 saves
 
 ## Run
 
