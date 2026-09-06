@@ -2,7 +2,7 @@
 
 An extension-first solo campaign companion. The application owns campaign state and the internal Domain map; Owlbear Rodeo is a host rather than a gameplay dependency.
 
-## Milestone 0.8
+## Milestone 0.9
 
 - Persistent versioned campaign state
 - Core resource controls
@@ -82,6 +82,16 @@ An extension-first solo campaign companion. The application owns campaign state 
 - Persistent Overseer and Influence context beside the Domain map
 - Imported-save normalization and physical-die range protection
 - Automatic migration of v0.7 campaign saves
+- Correct retracing: consume light and check Tension without repeating encounters or events
+- Darkness Resolve checks on every room entry without an active light
+- Concealed feature decisions that do not reveal trap or lock rolls after failed Perception
+- Human hit-location pause and location-specific Armor selection for incoming physical attacks
+- Post-fight Armor Integrity usage-die resolution, including breakage and discard
+- Full player combat action menu for attacks, Abilities, items, fleeing, and other actions
+- Automatic improvement marks for doubles rolled on Skills during combat or character checks
+- Exit checks stop once the Domain exit has been found
+- First-three-rooms, combat, recovery, and retracing integration coverage
+- Automatic migration of v0.8 campaign saves
 
 ## Run
 

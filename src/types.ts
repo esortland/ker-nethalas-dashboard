@@ -2,7 +2,7 @@ export type ResourceKey = "health" | "toughness" | "aether" | "sanity" | "exhaus
 export type Direction = "north" | "east" | "south" | "west";
 export type RoomState = "entered" | "searched" | "cleared" | "dangerous" | "camp";
 export type RoomKind = "unknown" | "room" | "corridor" | "lair" | "exit";
-export type ExplorationStep = "shape" | "lair" | "tension" | "encounter" | "event" | "combat" | "ready";
+export type ExplorationStep = "darkness" | "shape" | "lair" | "tension" | "encounter" | "event" | "combat" | "ready";
 
 export interface Resource { current: number; max: number }
 export interface AttributeRolls { health: number; toughness: [number, number, number]; aether: number; sanity: number }
@@ -25,7 +25,7 @@ export interface DomainRoom {
   eventDescription: string;
   scavengeUsed: boolean;
   deepSearchUsed: boolean;
-  feature: { trapped: boolean; locked: boolean; resolved: boolean; type: "none" | "door" | "container" | "environment"; difficultyRoll?: number; trapRoll?: number; lockRoll?: number; perception?: "passed" | "failed" };
+  feature: { trapped: boolean; locked: boolean; resolved: boolean; type: "none" | "door" | "container" | "environment"; difficultyRoll?: number; trapRoll?: number; lockRoll?: number; perception?: "passed" | "failed"; trapKnown?: boolean; interactionChosen?: boolean };
 }
 
 export interface CampaignEvent {
@@ -60,13 +60,14 @@ export interface CheckResult {
 export interface Enemy { id: string; name: string; health: number; maxHealth: number; combat: number; mind: number; armor: number; notes: string }
 export interface OpposedResult { attacker: CheckResult; defender: CheckResult; winner: "attacker" | "defender" | "tie"; bothFailed: boolean }
 export type CombatSide = "player" | "enemy";
-export type CombatStage = "setup" | "turn" | "hit-location" | "damage" | "defensive-move" | "enemy-damage" | "recovery";
+export type CombatStage = "setup" | "turn" | "hit-location" | "player-hit-location" | "damage" | "defensive-move" | "enemy-damage" | "recovery";
 export interface PendingCombatResolution {
   kind: "player-hit" | "enemy-hit" | "player-defended" | "enemy-defended";
   targetId?: string;
   critical: boolean;
   location?: string;
   weakSpot?: boolean;
+  armorItemId?: string;
 }
 export interface CombatState {
   active: boolean;
@@ -83,6 +84,8 @@ export interface CombatState {
   pending?: PendingCombatResolution;
   lastOpposed?: OpposedResult;
   log: string[];
+  armorUsed: string[];
+  armorIntegrityResolved: string[];
 }
 export type ItemWeight = "none" | "light" | "normal" | "heavy" | "coins";
 export type EquipmentSlot = "mainHand" | "offHand" | "belt" | "head" | "armor" | "gloves" | "boots" | "amulet" | "ring1" | "ring2" | "backpack" | "pouch1" | "pouch2" | "pouch3";
@@ -94,7 +97,7 @@ export interface Item {
 }
 
 export interface Campaign {
-  schemaVersion: 8;
+  schemaVersion: 9;
   id: string;
   name: string;
   characterName: string;
@@ -117,6 +120,9 @@ export interface Campaign {
   growingDarkness: string[];
   lightRemaining: number;
   explorationStep: ExplorationStep;
+  retracing: boolean;
+  darknessNextStep?: ExplorationStep;
+  previousRoomId?: string;
   inventory: Item[];
   equipment: Partial<Record<EquipmentSlot, string>>;
   combat: CombatState;

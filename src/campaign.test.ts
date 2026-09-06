@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { addFeature, addItem, addRoom, advanceCombatTurn, applyDamageToEnemy, applyDamageToPlayer, checkTension, choosePercentile, confirmDamageToEnemy, equipItem, establishInitiative, generateAttributes, importCampaign, investigateFeature, inventoryUsage, itemSlots, makeCampaign, nextCombatRound, performCheck, performManualCheck, previewDamage, recoverAfterCombat, resolveExplorationRoll, resolveOpposed, resolveOutcome, rollUsageDie, updateResource, validateCharacterSetup, validatePlaySetup } from "./campaign";
+import { addEnemy, addFeature, addItem, addRoom, advanceCombatTurn, applyDamageToEnemy, applyDamageToPlayer, checkTension, choosePercentile, confirmDamageToEnemy, enterRoom, equipItem, establishInitiative, fleeCombat, generateAttributes, importCampaign, investigateFeature, inventoryUsage, itemSlots, makeCampaign, markImprovementsFromChecks, nextCombatRound, performCheck, performManualCheck, previewDamage, recoverAfterCombat, resolveArmorIntegrity, resolveExplorationRoll, resolveOpposed, resolveOutcome, resolveUnknownFeatureInteraction, rollUsageDie, updateResource, useArmorInCombat, validateCharacterSetup, validatePlaySetup } from "./campaign";
 
 describe("campaign rules", () => {
   it("clamps resources", () => {
@@ -36,6 +36,7 @@ describe("campaign rules", () => {
     let campaign = makeCampaign();
     const bonuses: Record<string, number> = { bladed: 60, bludgeoning: 40, acrobatics: 30, athletics: 30, dodge: 30, medicine: 20, perception: 20, reason: 10, scavenge: 10, stealth: 10 };
     campaign.characterName = "Galea";
+    campaign.descentReason = "A debt that can only be paid below.";
     campaign = generateAttributes(campaign,{health:4,toughness:[2,3,4],aether:5,sanity:6});
     campaign.masteries = campaign.masteries.map((value,index)=>({...value,name:`Mastery ${index+1}`,tierOneAbility:`Ability ${index+1}`})) as typeof campaign.masteries;
     campaign.skills = campaign.skills.map(skill => ({ ...skill, base: skill.startingBase + (bonuses[skill.id] ?? 0) }));
@@ -86,9 +87,13 @@ describe("campaign rules", () => {
     expect(campaign.rooms[0].feature.locked).toBe(true);
     expect(campaign.rooms[0].feature.difficultyRoll).toBe(44);
   });
-  it("uses the lower lock threshold for containers", () => {
+  it("does not reveal trap or lock status after failed Perception", () => {
     let campaign = addFeature(makeCampaign(), "container");
     campaign = investigateFeature(campaign, "failed", { difficulty: 20, trap: 2, lock: 10 });
+    expect(campaign.rooms[0].feature.trapKnown).toBe(false);
+    expect(campaign.rooms[0].feature.trapRoll).toBeUndefined();
+    expect(campaign.rooms[0].feature.lockRoll).toBeUndefined();
+    campaign = resolveUnknownFeatureInteraction(campaign,{trap:2,lock:10});
     expect(campaign.rooms[0].feature.trapped).toBe(false);
     expect(campaign.rooms[0].feature.locked).toBe(true);
   });
@@ -207,7 +212,7 @@ describe("campaign rules", () => {
     const old:any={...makeCampaign(),schemaVersion:7};
     delete old.rollStyle; delete old.domainSetup;
     const campaign=importCampaign(old);
-    expect(campaign.schemaVersion).toBe(8);
+    expect(campaign.schemaVersion).toBe(9);
     expect(campaign.rollStyle).toBe("manual");
     expect(campaign.domainSetup.complete).toBe(false);
   });
@@ -223,5 +228,114 @@ describe("campaign rules", () => {
     expect(campaign.rooms).toHaveLength(1);
     expect(campaign.inventory.length).toBeGreaterThan(0);
     expect(campaign.combat.stage).toBe("setup");
+  });
+
+  it("checks Tension but skips encounters and events when retracing", () => {
+    let campaign=makeCampaign();
+    const torch=campaign.inventory.find(item=>item.kind==="light")!;
+    campaign={...campaign,activeLightItemId:torch.id,explorationStep:"ready"};
+    campaign=addRoom(campaign,"east");
+    const secondId=campaign.currentRoomId;
+    campaign={...campaign,explorationStep:"ready"};
+    campaign=enterRoom(campaign,campaign.rooms[0].id);
+    expect(campaign.retracing).toBe(true);
+    expect(campaign.explorationStep).toBe("tension");
+    campaign=resolveExplorationRoll(campaign,8);
+    expect(campaign.explorationStep).toBe("ready");
+    expect(campaign.rooms[0].encounterRoll).toBeUndefined();
+    expect(campaign.previousRoomId).toBe(secondId);
+  });
+
+  it("checks Resolve in darkness and resumes room generation", () => {
+    let campaign:ReturnType<typeof makeCampaign>={...makeCampaign(),explorationStep:"ready",lightRemaining:0,activeLightItemId:undefined};
+    const sanity=campaign.resources.sanity.current;
+    campaign=addRoom(campaign,"east");
+    expect(campaign.explorationStep).toBe("darkness");
+    campaign=resolveExplorationRoll(campaign,99);
+    expect(campaign.resources.sanity.current).toBe(sanity-1);
+    expect(campaign.explorationStep).toBe("shape");
+  });
+
+  it("stops rolling the Exit die after the exit is found", () => {
+    const campaign={...makeCampaign(),lairFound:true,exitFound:true,explorationStep:"lair" as const,exitDie:4 as const};
+    const next=resolveExplorationRoll(campaign,1);
+    expect(next.exitDie).toBe(4);
+    expect(next.explorationStep).toBe("tension");
+  });
+
+  it("automatically marks combat Skill doubles for Camp improvement", () => {
+    const check=performManualCheck("skill:dodge","Dodge",40,0,44);
+    const campaign=markImprovementsFromChecks(makeCampaign(),check);
+    expect(campaign.skills.find(skill=>skill.id==="dodge")?.markedForImprovement).toBe(true);
+  });
+
+  it("steps down and eventually breaks only the armor used in combat", () => {
+    let campaign=addItem(makeCampaign(),{name:"Greaves",quantity:1,weight:"normal",kind:"armor",traits:[],notes:"legs",twoHanded:false,armor:2,integrity:6});
+    const greaves=campaign.inventory.at(-1)!;
+    campaign=equipItem(campaign,greaves.id,"boots");
+    campaign=useArmorInCombat(campaign,greaves.id);
+    campaign=resolveArmorIntegrity(campaign,greaves.id,2);
+    expect(campaign.inventory.find(item=>item.id===greaves.id)?.integrity).toBe(4);
+    campaign={...campaign,combat:{...campaign.combat,armorIntegrityResolved:[]}};
+    campaign=resolveArmorIntegrity(campaign,greaves.id,1);
+    expect(campaign.inventory.some(item=>item.id===greaves.id)).toBe(false);
+    expect(campaign.equipment.boots).toBeUndefined();
+  });
+
+  it("runs the first three rooms, a fight, and a safe retrace end to end", () => {
+    let campaign=makeCampaign();
+    const torch=campaign.inventory.find(item=>item.kind==="light")!;
+    campaign={...campaign,activeLightItemId:torch.id,explorationStep:"shape"};
+    const clearRoom=(value:typeof campaign) => {
+      let next=resolveExplorationRoll(value,70);
+      next=resolveExplorationRoll(next,8);
+      next=resolveExplorationRoll(next,8);
+      next=resolveExplorationRoll(next,9);
+      return resolveExplorationRoll(next,42);
+    };
+    campaign=clearRoom(campaign);
+    campaign=addRoom(campaign,"east");
+    campaign=clearRoom(campaign);
+    campaign=addRoom(campaign,"south");
+    campaign=resolveExplorationRoll(campaign,70);
+    campaign=resolveExplorationRoll(campaign,8);
+    campaign=resolveExplorationRoll(campaign,8);
+    campaign=resolveExplorationRoll(campaign,15);
+    expect(campaign.explorationStep).toBe("combat");
+    campaign=addEnemy(campaign,{name:"Bone Wretch",health:6,maxHealth:6,combat:40,mind:20,armor:1,notes:""});
+    campaign=establishInitiative(campaign,"player");
+    const enemyId=campaign.combat.enemies[0].id;
+    campaign=confirmDamageToEnemy(campaign,enemyId,7,0,false);
+    expect(campaign.combat.enemies[0].health).toBe(0);
+    campaign=recoverAfterCombat({...campaign,combat:{...campaign.combat,stage:"recovery"}},3);
+    campaign={...campaign,explorationStep:"ready"};
+    const room2=campaign.rooms.find(room=>room.number===2)!;
+    campaign=enterRoom(campaign,room2.id);
+    campaign=resolveExplorationRoll(campaign,8);
+    expect(campaign.explorationStep).toBe("ready");
+    expect(campaign.rooms).toHaveLength(3);
+  });
+
+  it("fleeing returns to the previous room and leaves danger behind", () => {
+    let campaign=makeCampaign();
+    campaign={...campaign,activeLightItemId:campaign.inventory.find(item=>item.kind==="light")!.id};
+    campaign=addRoom({...campaign,explorationStep:"ready"},"east");
+    const danger=campaign.currentRoomId;
+    campaign=fleeCombat({...campaign,combat:{...campaign.combat,active:true}});
+    expect(campaign.currentRoomId).not.toBe(danger);
+    expect(campaign.rooms.find(room=>room.id===danger)?.state).toBe("dangerous");
+    expect(campaign.combat.active).toBe(false);
+    campaign=enterRoom(campaign,danger);
+    campaign=resolveExplorationRoll(campaign,8);
+    expect(campaign.explorationStep).toBe("combat");
+  });
+
+  it("migrates v0.8 saves with v0.9 combat bookkeeping", () => {
+    const old:any={...makeCampaign(),schemaVersion:8};
+    delete old.retracing; delete old.combat.armorUsed; delete old.combat.armorIntegrityResolved;
+    const campaign=importCampaign(old);
+    expect(campaign.schemaVersion).toBe(9);
+    expect(campaign.retracing).toBe(false);
+    expect(campaign.combat.armorUsed).toEqual([]);
   });
 });

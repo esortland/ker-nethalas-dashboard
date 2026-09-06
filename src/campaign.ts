@@ -2,7 +2,7 @@ import type { AttributeRolls, Campaign, CheckMode, CheckOutcome, CheckResult, Co
 
 export const STORAGE_KEY = "com.esortland.ker-nethalas/campaigns-v1";
 
-export const freshCombat = (): CombatState => ({ active: false, round: 1, actingSide: "player", reactions: 0, enemyTurnsTaken: [], enemies: [], stage: "setup", surpriseAttempted: false, initiativePenalty: 0, surpriseBonus: { player: 0, enemy: 0 }, log: [] });
+export const freshCombat = (): CombatState => ({ active: false, round: 1, actingSide: "player", reactions: 0, enemyTurnsTaken: [], enemies: [], stage: "setup", surpriseAttempted: false, initiativePenalty: 0, surpriseBonus: { player: 0, enemy: 0 }, log: [], armorUsed: [], armorIntegrityResolved: [] });
 
 export const DEFAULT_SKILLS: Skill[] = [
   ["acrobatics", "Acrobatics", "general", 10], ["athletics", "Athletics", "general", 10],
@@ -18,7 +18,7 @@ export function makeCampaign(): Campaign {
   const now = new Date().toISOString();
   const room: DomainRoom = { id: crypto.randomUUID(), number: 1, x: 0, y: 0, state: "entered", notes: "", tags: [], kind: "unknown", entryType: "passage", description: "", hasEncounter: false, eventDescription: "", scavengeUsed: false, deepSearchUsed: false, feature: { trapped: false, locked: false, resolved: true, type: "none" } };
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     id: crypto.randomUUID(),
     name: "The First Descent",
     characterName: "Unnamed Gravebound",
@@ -49,6 +49,7 @@ export function makeCampaign(): Campaign {
     growingDarkness: [],
     lightRemaining: 20,
     explorationStep: "shape",
+    retracing: false,
     inventory: [
       { id: crypto.randomUUID(), name: "Torch", quantity: 1, weight: "light", kind: "light", traits: [], notes: "20 rooms of light", twoHanded: false, armor: 0 },
       { id: crypto.randomUUID(), name: "Ration", quantity: 1, weight: "light", kind: "consumable", traits: [], notes: "Reduce Exhaustion by 1", twoHanded: false, armor: 0 }
@@ -79,7 +80,8 @@ export function importCampaign(input: unknown): Campaign {
     const parsed = input as Campaign & { schemaVersion: number };
     if (!parsed || typeof parsed !== "object" || !Number.isInteger(parsed.schemaVersion)) throw new Error("This file is not a Ker Nethalas campaign save.");
     let campaign:Campaign;
-    if (parsed.schemaVersion === 8) campaign=parsed;
+    if (parsed.schemaVersion === 9) campaign=parsed;
+    else if (parsed.schemaVersion === 8) campaign=migrateV8(parsed);
     else if (parsed.schemaVersion === 7) campaign=migrateV7(parsed);
     else if (parsed.schemaVersion === 6) campaign=migrateV6(parsed);
     else if (parsed.schemaVersion === 5) campaign=migrateV5(parsed);
@@ -100,7 +102,7 @@ function normalizeCampaign(input:any):Campaign {
   const base=makeCampaign();
   const rooms=Array.isArray(input.rooms)&&input.rooms.length?input.rooms.map(hydrateRoom):base.rooms;
   const currentRoomId=rooms.some((room:DomainRoom)=>room.id===input.currentRoomId)?input.currentRoomId:rooms[0].id;
-  return { ...base,...input,schemaVersion:8,rollStyle:input.rollStyle==="digital"?"digital":"manual",domainSetup:{...base.domainSetup,...(input.domainSetup??{})},resources:{...base.resources,...(input.resources??{})},combat:{...freshCombat(),...(input.combat??{}),surpriseBonus:{...freshCombat().surpriseBonus,...(input.combat?.surpriseBonus??{})},enemyTurnsTaken:Array.isArray(input.combat?.enemyTurnsTaken)?input.combat.enemyTurnsTaken:[]},rooms,currentRoomId,inventory:Array.isArray(input.inventory)?input.inventory:base.inventory,equipment:input.equipment&&typeof input.equipment==="object"?input.equipment:{},skills:Array.isArray(input.skills)?input.skills:base.skills,masteries:Array.isArray(input.masteries)&&input.masteries.length===2?input.masteries:base.masteries,events:Array.isArray(input.events)?input.events:base.events };
+  return { ...base,...input,schemaVersion:9,rollStyle:input.rollStyle==="digital"?"digital":"manual",domainSetup:{...base.domainSetup,...(input.domainSetup??{})},resources:{...base.resources,...(input.resources??{})},combat:{...freshCombat(),...(input.combat??{}),surpriseBonus:{...freshCombat().surpriseBonus,...(input.combat?.surpriseBonus??{})},enemyTurnsTaken:Array.isArray(input.combat?.enemyTurnsTaken)?input.combat.enemyTurnsTaken:[],armorUsed:Array.isArray(input.combat?.armorUsed)?input.combat.armorUsed:[],armorIntegrityResolved:Array.isArray(input.combat?.armorIntegrityResolved)?input.combat.armorIntegrityResolved:[]},rooms,currentRoomId,inventory:Array.isArray(input.inventory)?input.inventory:base.inventory,equipment:input.equipment&&typeof input.equipment==="object"?input.equipment:{},skills:Array.isArray(input.skills)?input.skills:base.skills,masteries:Array.isArray(input.masteries)&&input.masteries.length===2?input.masteries:base.masteries,events:Array.isArray(input.events)?input.events:base.events };
 }
 
 function migrateV1(old: any): Campaign {
@@ -136,7 +138,11 @@ function migrateV6(old: any): Campaign {
 
 function migrateV7(old: any): Campaign {
   const playStarted = Boolean(old.rooms?.some((room:any) => room.number > 1 || room.shapeRoll !== undefined));
-  return { ...old, schemaVersion:8, rollStyle:"manual", domainSetup:{ complete:playStarted, overseerName:"", influence:"", lightChoice:playStarted?(old.activeLightItemId?"lit":"dark"):"" } };
+  return migrateV8({ ...old, schemaVersion:8, rollStyle:"manual", domainSetup:{ complete:playStarted, overseerName:"", influence:"", lightChoice:playStarted?(old.activeLightItemId?"lit":"dark"):"" } });
+}
+
+function migrateV8(old: any): Campaign {
+  return { ...old, schemaVersion:9, retracing:false, combat:{ ...freshCombat(), ...(old.combat ?? {}), armorUsed:[], armorIntegrityResolved:[] } };
 }
 
 export function saveCampaign(campaign: Campaign) {
@@ -215,13 +221,18 @@ export function addRoom(campaign: Campaign, direction: Direction, entryType: "pa
     x: current.x + dx, y: current.y + dy, state: "entered", notes: "", tags: [], kind: "unknown", entryType, description: "", hasEncounter: false, eventDescription: "", scavengeUsed: false, deepSearchUsed: false,
     feature: { trapped: false, locked: false, resolved: entryType === "passage", type: entryType === "door" ? "door" : "none" },
   };
+  const lightRemaining = Math.max(0, campaign.lightRemaining - 1);
+  const inDarkness = lightRemaining === 0 || !campaign.activeLightItemId;
   return log({
     ...campaign,
     rooms: [...campaign.rooms, room],
     currentRoomId: room.id,
+    previousRoomId: current.id,
+    retracing: false,
     phase: "enter",
-    explorationStep: "shape",
-    lightRemaining: Math.max(0, campaign.lightRemaining - 1),
+    explorationStep: inDarkness ? "darkness" : "shape",
+    darknessNextStep: inDarkness ? "shape" : undefined,
+    lightRemaining,
     resources: { ...campaign.resources, aether: { ...campaign.resources.aether, current: campaign.resources.aether.max } },
   }, `Entered Room ${room.number}; Aether restored.`);
 }
@@ -229,13 +240,14 @@ export function addRoom(campaign: Campaign, direction: Direction, entryType: "pa
 export function enterRoom(campaign: Campaign, id: string): Campaign {
   const room = campaign.rooms.find((candidate) => candidate.id === id);
   if (!room || room.id === campaign.currentRoomId) return campaign;
+  const lightRemaining = Math.max(0, campaign.lightRemaining - 1);
+  const inDarkness = lightRemaining === 0 || !campaign.activeLightItemId;
   return log({
-    ...campaign, currentRoomId: id, phase: "enter", explorationStep: "tension", lightRemaining: Math.max(0, campaign.lightRemaining - 1),
+    ...campaign, currentRoomId: id, previousRoomId: campaign.currentRoomId, retracing: true, phase: "enter", explorationStep: inDarkness ? "darkness" : "tension", darknessNextStep: inDarkness ? "tension" : undefined, lightRemaining,
     resources: { ...campaign.resources, aether: { ...campaign.resources.aether, current: campaign.resources.aether.max } },
   }, `Returned to Room ${room.number}; Aether restored.`);
 }
 
-const explorationOrder: ExplorationStep[] = ["shape", "lair", "tension", "encounter", "event", "ready"];
 export function setExplorationStep(campaign: Campaign, step: ExplorationStep) { return { ...campaign, explorationStep: step }; }
 
 function stepUsageDie<T extends 4 | 6 | 8 | 10>(die: T, result: number): { die: T; triggered: boolean } {
@@ -254,28 +266,50 @@ export function checkTension(campaign: Campaign, forcedRoll?: number): Campaign 
 }
 
 export function addFeature(campaign: Campaign, type: DomainRoom["feature"]["type"]): Campaign {
-  return { ...campaign, rooms: campaign.rooms.map(room => room.id === campaign.currentRoomId ? { ...room, feature: { type, trapped: false, locked: false, resolved: false } } : room) };
+  return { ...campaign, rooms: campaign.rooms.map(room => room.id === campaign.currentRoomId ? { ...room, feature: { type, trapped: false, locked: false, resolved: false, trapKnown:false, interactionChosen:false } } : room) };
 }
 
 export function investigateFeature(campaign: Campaign, perception: "passed" | "failed", rolls?: { difficulty?: number; trap?: number; lock?: number }): Campaign {
   const room = campaign.rooms.find(value => value.id === campaign.currentRoomId)!;
   const difficultyRoll = rolls?.difficulty === undefined ? rollDie(100) : clampRoll(rolls.difficulty,100);
+  if (perception === "failed") {
+    const next = { ...campaign, rooms: campaign.rooms.map(value => value.id === room.id ? { ...value, feature: { ...value.feature, difficultyRoll, perception, trapKnown:false, interactionChosen:false, trapRoll:undefined, lockRoll:undefined } } : value) };
+    return log(next, `${room.feature.type} investigated: difficulty roll ${difficultyRoll}; Perception failed. Its danger remains concealed.`);
+  }
   const trapRoll = rolls?.trap === undefined ? rollDie(10) : clampRoll(rolls.trap,10);
   const lockRoll = room.feature.type === "door" || room.feature.type === "container" ? rolls?.lock === undefined ? rollDie(20) : clampRoll(rolls.lock,20) : undefined;
   const trapped = trapRoll >= 7;
   const locked = room.feature.type === "door" ? (lockRoll ?? 0) >= 12 : room.feature.type === "container" ? (lockRoll ?? 0) >= 10 : false;
-  const next = { ...campaign, rooms: campaign.rooms.map(value => value.id === room.id ? { ...value, feature: { ...value.feature, difficultyRoll, trapRoll, lockRoll, trapped, locked, perception } } : value) };
+  const next = { ...campaign, rooms: campaign.rooms.map(value => value.id === room.id ? { ...value, feature: { ...value.feature, difficultyRoll, trapRoll, lockRoll, trapped, locked, perception, trapKnown:true, interactionChosen:true } } : value) };
   return log(next, `${room.feature.type} investigated: difficulty roll ${difficultyRoll}; Perception ${perception}; trap ${trapRoll}${lockRoll ? `; lock ${lockRoll}` : ""}.`);
+}
+
+export function resolveUnknownFeatureInteraction(campaign: Campaign, rolls?: { trap?: number; lock?: number }): Campaign {
+  const room = campaign.rooms.find(value => value.id === campaign.currentRoomId)!;
+  if (room.feature.perception !== "failed" || room.feature.interactionChosen) return campaign;
+  const trapRoll = rolls?.trap === undefined ? rollDie(10) : clampRoll(rolls.trap,10);
+  const lockRoll = room.feature.type === "door" || room.feature.type === "container" ? rolls?.lock === undefined ? rollDie(20) : clampRoll(rolls.lock,20) : undefined;
+  const trapped = trapRoll >= 7;
+  const locked = room.feature.type === "door" ? (lockRoll ?? 0) >= 12 : room.feature.type === "container" ? (lockRoll ?? 0) >= 10 : false;
+  const next = { ...campaign, rooms: campaign.rooms.map(value => value.id === room.id ? { ...value, feature:{ ...value.feature, trapRoll, lockRoll, trapped, locked, trapKnown:true, interactionChosen:true } } : value) };
+  return log(next, trapped ? `${room.feature.type} interaction triggered a concealed trap (d10 ${trapRoll}).` : `${room.feature.type} interaction found no trap (d10 ${trapRoll})${lockRoll ? `; lock d20 ${lockRoll}` : ""}.`);
 }
 
 export function resolveExplorationRoll(campaign: Campaign, forcedRoll?: number): Campaign {
   const room = campaign.rooms.find(value => value.id === campaign.currentRoomId)!;
   const patchRoom = (patch: Partial<DomainRoom>) => ({ ...campaign, rooms: campaign.rooms.map(value => value.id === room.id ? { ...value, ...patch } : value) });
+  if (campaign.explorationStep === "darkness") {
+    const result = forcedRoll === undefined ? rollDie(100) : clampRoll(forcedRoll,100);
+    const passed = result <= campaign.resistances.resolve;
+    const resources = passed ? campaign.resources : { ...campaign.resources, sanity:{ ...campaign.resources.sanity, current:Math.max(0,campaign.resources.sanity.current-1) } };
+    return log({ ...campaign, resources, explorationStep:campaign.darknessNextStep ?? (campaign.retracing ? "tension" : "shape"), darknessNextStep:undefined }, `Darkness Resolve ${result}/${campaign.resistances.resolve}: ${passed ? "passed" : "failed; lost 1 Sanity"}.`);
+  }
   if (campaign.explorationStep === "shape") {
     const roll = forcedRoll === undefined ? rollDie(100) : clampRoll(forcedRoll,100); const kind = roll <= 25 ? "corridor" : "room";
     return log({ ...patchRoom({ shapeRoll: roll, kind }), explorationStep: "lair" }, `Room ${room.number}: shape roll ${roll}, ${kind}.`);
   }
   if (campaign.explorationStep === "lair") {
+    if (campaign.exitFound) return { ...campaign, explorationStep:"tension" };
     if (campaign.lairFound) {
       const result = forcedRoll === undefined ? rollDie(campaign.exitDie) : clampRoll(forcedRoll,campaign.exitDie); const next = stepUsageDie(campaign.exitDie, result);
       return log({ ...patchRoom(next.triggered ? { kind: "exit" } : {}), exitDie: next.triggered ? 8 : next.die as Campaign["exitDie"], exitFound: campaign.exitFound || next.triggered, explorationStep: "tension" }, next.triggered ? "The Domain exit was found." : `Exit die rolled ${result}; now d${next.die}.`);
@@ -284,7 +318,9 @@ export function resolveExplorationRoll(campaign: Campaign, forcedRoll?: number):
     return log({ ...patchRoom(next.triggered ? { kind: "lair" } : {}), lairDie: next.triggered ? 10 : next.die as Campaign["lairDie"], lairFound: next.triggered, explorationStep: "tension" }, next.triggered ? "The Overseer's Lair was found." : `Lair die rolled ${result}; now d${next.die}.`);
   }
   if (campaign.explorationStep === "tension") {
-    return { ...checkTension(campaign, forcedRoll), explorationStep: "encounter" };
+    const checked=checkTension(campaign, forcedRoll);
+    const retraceStep:ExplorationStep=room.hasEncounter||room.state==="dangerous"?"combat":"ready";
+    return { ...checked, explorationStep: campaign.retracing ? retraceStep : "encounter", retracing: campaign.retracing ? false : campaign.retracing };
   }
   if (campaign.explorationStep === "encounter") {
     if (room.kind === "lair") return { ...campaign, explorationStep: "combat" };
@@ -352,16 +388,27 @@ export function resolveOpposed(attacker: CheckResult, defender: CheckResult): Op
   return { attacker, defender, winner, bothFailed };
 }
 
-export function playerArmor(campaign: Campaign) {
+export function markImprovementsFromChecks(campaign: Campaign, ...checks: CheckResult[]): Campaign {
+  const ids = new Set(checks.filter(check => check.canMarkImprovement && check.subjectId.startsWith("skill:")).map(check => check.subjectId.slice(6)));
+  if (!ids.size) return campaign;
+  const names = campaign.skills.filter(skill => ids.has(skill.id)).map(skill => skill.name);
+  return log({ ...campaign, skills:campaign.skills.map(skill => ids.has(skill.id) ? { ...skill, markedForImprovement:true } : skill) }, `Improvement marked: ${names.join(", ")}.`);
+}
+
+export function equippedArmor(campaign: Campaign) {
   const equipped = new Set(Object.values(campaign.equipment));
-  return campaign.inventory.filter(item => equipped.has(item.id)).reduce((sum, item) => sum + item.armor, 0);
+  return campaign.inventory.filter(item => equipped.has(item.id) && item.kind === "armor" && item.armor > 0);
+}
+
+export function playerArmor(campaign: Campaign) {
+  return Math.max(0, ...equippedArmor(campaign).map(item => item.armor));
 }
 
 export function addEnemy(campaign: Campaign, enemy: Omit<Enemy, "id">): Campaign {
   return { ...campaign, combat: { ...campaign.combat, active: true, stage: campaign.combat.active ? campaign.combat.stage : "setup", enemies: [...campaign.combat.enemies, { ...enemy, id: crypto.randomUUID() }] } };
 }
 
-export function applyDamageToPlayer(campaign: Campaign, damage: number, armor = playerArmor(campaign), unmitigated = false): Campaign {
+export function applyDamageToPlayer(campaign: Campaign, damage: number, armor = 0, unmitigated = false): Campaign {
   let remaining = Math.max(0, damage - (unmitigated ? 0 : armor));
   const toughnessLoss = Math.min(campaign.resources.toughness.current, remaining); remaining -= toughnessLoss;
   const healthLoss = Math.min(campaign.resources.health.current, remaining);
@@ -409,11 +456,46 @@ export function confirmDamageToEnemy(campaign: Campaign, id: string, rolled: num
   return log({ ...campaign, combat: { ...campaign.combat, enemies: campaign.combat.enemies.map(value => value.id === id ? { ...value, health: Math.max(0, value.health - damage.final) } : value) } }, `${enemy.name} takes ${damage.final} damage (${damage.criticalTotal} before Armor; ${response}).`);
 }
 
+export function useArmorInCombat(campaign: Campaign, itemId?: string): Campaign {
+  if (!itemId || !equippedArmor(campaign).some(item => item.id === itemId)) return campaign;
+  return { ...campaign, combat:{ ...campaign.combat, armorUsed:[...new Set([...campaign.combat.armorUsed,itemId])] } };
+}
+
+export function resolveArmorIntegrity(campaign: Campaign, itemId: string, forcedRoll?: number): Campaign {
+  const item=campaign.inventory.find(value=>value.id===itemId);
+  if (!item || campaign.combat.armorIntegrityResolved.includes(itemId)) return campaign;
+  if (!item.integrity) return log({ ...campaign, combat:{ ...campaign.combat, armorIntegrityResolved:[...campaign.combat.armorIntegrityResolved,itemId] } }, `${item.name}: no Integrity die recorded; resolve from the item entry.`);
+  const result=forcedRoll===undefined?rollDie(item.integrity):clampRoll(forcedRoll,item.integrity);
+  let inventory=campaign.inventory;
+  let equipment=campaign.equipment;
+  let text=`${item.name} Integrity d${item.integrity}: ${result}; unchanged.`;
+  if (result<=2) {
+    const chain=[20,12,10,8,6,4] as const;
+    if (item.integrity===4) {
+      inventory=campaign.inventory.filter(value=>value.id!==itemId);
+      equipment={...campaign.equipment};
+      for (const slot of Object.keys(equipment) as EquipmentSlot[]) if (equipment[slot]===itemId) delete equipment[slot];
+      text=`${item.name} Integrity d4: ${result}; broken beyond repair and discarded.`;
+    } else {
+      const integrity=chain[chain.indexOf(item.integrity)+1];
+      inventory=campaign.inventory.map(value=>value.id===itemId?{...value,integrity}:value);
+      text=`${item.name} Integrity d${item.integrity}: ${result}; stepped down to d${integrity}.`;
+    }
+  }
+  return log({ ...campaign, inventory, equipment, combat:{ ...campaign.combat, armorIntegrityResolved:[...campaign.combat.armorIntegrityResolved,itemId] } },text);
+}
+
+export function fleeCombat(campaign: Campaign): Campaign {
+  const destination=campaign.rooms.find(room=>room.id===campaign.previousRoomId);
+  const rooms=campaign.rooms.map(room=>room.id===campaign.currentRoomId?{...room,state:"dangerous" as const,hasEncounter:true}:room);
+  return log({ ...campaign, rooms, currentRoomId:destination?.id??campaign.currentRoomId, previousRoomId:campaign.currentRoomId, retracing:false, phase:"explore", explorationStep:"ready", combat:freshCombat() }, destination ? `Fled to Room ${destination.number}.` : "Fled the fight; no previous room was recorded.");
+}
+
 export function recoverAfterCombat(campaign: Campaign, roll: number): Campaign {
   const amount = Math.max(1, Math.min(4, Math.round(roll)));
   const before = campaign.resources.toughness.current;
   const recovered = Math.min(amount, campaign.resources.toughness.max - before);
-  return log({ ...updateResource(campaign, "toughness", amount), combat: { ...campaign.combat, active: false, stage: "setup", round: 1, reactions: 0, enemyTurnsTaken: [], pending: undefined, lastOpposed: undefined, initiativeSide: undefined, surpriseAttempted: false, initiativePenalty: 0, surpriseBonus: { player: 0, enemy: 0 }, enemies: [] } }, `Combat ended; recovered ${recovered} Toughness (d4 roll ${amount}).`);
+  return log({ ...updateResource(campaign, "toughness", amount), combat: freshCombat() }, `Combat ended; recovered ${recovered} Toughness (d4 roll ${amount}).`);
 }
 
 export function validateCharacterSetup(campaign: Campaign) {
@@ -425,8 +507,8 @@ export function validateCharacterSetup(campaign: Campaign) {
   const resistances = Object.values(campaign.resistances).sort((a, b) => a - b).join(",") === "20,20,40";
   const masteries = campaign.masteries.length === 2 && campaign.masteries.every(value => value.name.trim() && value.tierOneAbility.trim());
   return {
-    valid: campaign.attributesGenerated && masteries && allowed && weapon60 === 1 && weapon40 === 1 && count(30) === 3 && count(20) === 2 && count(10) === 3 && resistances && campaign.characterName.trim().length > 0,
-    summary: { attributes:campaign.attributesGenerated, masteries, weapon60, weapon40, thirty: count(30), twenty: count(20), ten: count(10), resistances },
+    valid: campaign.attributesGenerated && masteries && allowed && weapon60 === 1 && weapon40 === 1 && count(30) === 3 && count(20) === 2 && count(10) === 3 && resistances && campaign.characterName.trim().length > 0 && campaign.descentReason.trim().length > 0,
+    summary: { attributes:campaign.attributesGenerated, masteries, descentReason:campaign.descentReason.trim().length>0, weapon60, weapon40, thirty: count(30), twenty: count(20), ten: count(10), resistances },
   };
 }
 
