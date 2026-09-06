@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { addFeature, addItem, addRoom, applyDamageToEnemy, applyDamageToPlayer, checkTension, choosePercentile, equipItem, investigateFeature, inventoryUsage, itemSlots, makeCampaign, nextCombatRound, performCheck, resolveExplorationRoll, resolveOpposed, resolveOutcome, updateResource, validateCharacterSetup } from "./campaign";
+import { addFeature, addItem, addRoom, applyDamageToEnemy, applyDamageToPlayer, checkTension, choosePercentile, equipItem, generateAttributes, investigateFeature, inventoryUsage, itemSlots, makeCampaign, nextCombatRound, performCheck, resolveExplorationRoll, resolveOpposed, resolveOutcome, updateResource, validateCharacterSetup } from "./campaign";
 
 describe("campaign rules", () => {
   it("clamps resources", () => {
-    const campaign = makeCampaign();
+    let campaign = makeCampaign();
     expect(updateResource(campaign, "health", -99).resources.health.current).toBe(0);
     expect(updateResource(campaign, "health", 99).resources.health.current).toBe(campaign.resources.health.max);
   });
@@ -33,11 +33,21 @@ describe("campaign rules", () => {
     expect(result.canMarkImprovement).toBe(true);
   });
   it("validates the exact starting allotment", () => {
-    const campaign = makeCampaign();
+    let campaign = makeCampaign();
     const bonuses: Record<string, number> = { bladed: 60, bludgeoning: 40, acrobatics: 30, athletics: 30, dodge: 30, medicine: 20, perception: 20, reason: 10, scavenge: 10, stealth: 10 };
     campaign.characterName = "Galea";
+    campaign = generateAttributes(campaign,{health:4,toughness:[2,3,4],aether:5,sanity:6});
+    campaign.masteries = campaign.masteries.map((value,index)=>({...value,name:`Mastery ${index+1}`,tierOneAbility:`Ability ${index+1}`})) as typeof campaign.masteries;
     campaign.skills = campaign.skills.map(skill => ({ ...skill, base: skill.startingBase + (bonuses[skill.id] ?? 0) }));
     expect(validateCharacterSetup(campaign).valid).toBe(true);
+  });
+  it("generates character attributes from visible dice", () => {
+    const campaign=generateAttributes(makeCampaign(),{health:4,toughness:[2,3,4],aether:5,sanity:6});
+    expect(campaign.resources.health).toEqual({current:14,max:14});
+    expect(campaign.resources.toughness).toEqual({current:29,max:29});
+    expect(campaign.resources.aether).toEqual({current:13,max:13});
+    expect(campaign.resources.sanity).toEqual({current:16,max:16});
+    expect(campaign.attributesGenerated).toBe(true);
   });
   it("walks a room through shape, discovery, tension and encounter", () => {
     let campaign = makeCampaign();
