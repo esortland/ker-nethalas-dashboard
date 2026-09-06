@@ -1,4 +1,4 @@
-import type { Campaign, CheckMode, CheckOutcome, CheckResult, Direction, DomainRoom, Enemy, EquipmentSlot, ExplorationStep, Item, OpposedResult, ResourceKey, Skill } from "./types";
+import type { AttributeRolls, Campaign, CheckMode, CheckOutcome, CheckResult, Direction, DomainRoom, Enemy, EquipmentSlot, ExplorationStep, Item, OpposedResult, ResourceKey, Skill } from "./types";
 
 export const STORAGE_KEY = "com.esortland.ker-nethalas/campaigns-v1";
 
@@ -16,7 +16,7 @@ export function makeCampaign(): Campaign {
   const now = new Date().toISOString();
   const room: DomainRoom = { id: crypto.randomUUID(), number: 1, x: 0, y: 0, state: "entered", notes: "", tags: [], kind: "unknown", entryType: "passage", description: "", hasEncounter: false, eventDescription: "", scavengeUsed: false, deepSearchUsed: false, feature: { trapped: false, locked: false, resolved: true, type: "none" } };
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     id: crypto.randomUUID(),
     name: "The First Descent",
     characterName: "Unnamed Gravebound",
@@ -30,6 +30,11 @@ export function makeCampaign(): Campaign {
       sanity: { current: 13, max: 13 },
       exhaustion: { current: 0, max: 10 },
     },
+    attributesGenerated: false,
+    masteries: [
+      { id: crypto.randomUUID(), name: "", feature: "", tierOneAbility: "" },
+      { id: crypto.randomUUID(), name: "", feature: "", tierOneAbility: "" },
+    ],
     eventDie: 20,
     tensionDie: 8,
     lairDie: 10,
@@ -61,7 +66,8 @@ export function loadCampaign(): Campaign {
   if (!raw) return makeCampaign();
   try {
     const parsed = JSON.parse(raw) as Campaign & { schemaVersion: number };
-    if (parsed.schemaVersion === 5) return parsed;
+    if (parsed.schemaVersion === 6) return parsed;
+    if (parsed.schemaVersion === 5) return migrateV5(parsed);
     if (parsed.schemaVersion === 4) return migrateV4(parsed);
     if (parsed.schemaVersion === 3) return migrateV3(parsed);
     if (parsed.schemaVersion === 2) return migrateV2({
@@ -94,7 +100,14 @@ function migrateV3(old: any): Campaign {
 }
 
 function migrateV4(old: any): Campaign {
-  return { ...old, schemaVersion: 5, combat: { active: false, round: 1, actingSide: "player", reactions: 0, enemies: [], log: [] } };
+  return migrateV5({ ...old, schemaVersion: 5, combat: { active: false, round: 1, actingSide: "player", reactions: 0, enemies: [], log: [] } });
+}
+
+function migrateV5(old: any): Campaign {
+  return { ...old, schemaVersion: 6, attributesGenerated: old.characterCreated, masteries: old.masteries ?? [
+    { id: crypto.randomUUID(), name: "Legacy Mastery 1", feature: "Record from character sheet", tierOneAbility: "Record from character sheet" },
+    { id: crypto.randomUUID(), name: "Legacy Mastery 2", feature: "Record from character sheet", tierOneAbility: "Record from character sheet" },
+  ] };
 }
 
 export function saveCampaign(campaign: Campaign) {
@@ -105,6 +118,12 @@ export function updateResource(campaign: Campaign, key: ResourceKey, delta: numb
   const resource = campaign.resources[key];
   const current = Math.max(0, Math.min(resource.max, resource.current + delta));
   return { ...campaign, resources: { ...campaign.resources, [key]: { ...resource, current } } };
+}
+
+export function generateAttributes(campaign: Campaign, supplied?: AttributeRolls): Campaign {
+  const rolls: AttributeRolls = supplied ?? { health: rollDie(6), toughness: [rollDie(6), rollDie(6), rollDie(6)], aether: rollDie(6), sanity: rollDie(6) };
+  const health=rolls.health+10, toughness=rolls.toughness.reduce((sum,value)=>sum+value,20), aether=rolls.aether+8, sanity=rolls.sanity+10;
+  return log({ ...campaign, attributesGenerated:true, attributeRolls:rolls, resources:{ ...campaign.resources, health:{current:health,max:health}, toughness:{current:toughness,max:toughness}, aether:{current:aether,max:aether}, sanity:{current:sanity,max:sanity}, exhaustion:{current:0,max:10} } }, `Attributes established: Health ${health}, Toughness ${toughness}, Aether ${aether}, Sanity ${sanity}.`);
 }
 
 export function itemSlots(item: Item) {
@@ -327,9 +346,10 @@ export function validateCharacterSetup(campaign: Campaign) {
   const weapon40 = allocations.filter(value => value.bonus === 40 && value.skill.category === "weapon").length;
   const allowed = allocations.every(value => [0, 10, 20, 30, 40, 60].includes(value.bonus) && (value.bonus < 40 || value.skill.category === "weapon"));
   const resistances = Object.values(campaign.resistances).sort((a, b) => a - b).join(",") === "20,20,40";
+  const masteries = campaign.masteries.length === 2 && campaign.masteries.every(value => value.name.trim() && value.tierOneAbility.trim());
   return {
-    valid: allowed && weapon60 === 1 && weapon40 === 1 && count(30) === 3 && count(20) === 2 && count(10) === 3 && resistances && campaign.characterName.trim().length > 0,
-    summary: { weapon60, weapon40, thirty: count(30), twenty: count(20), ten: count(10), resistances },
+    valid: campaign.attributesGenerated && masteries && allowed && weapon60 === 1 && weapon40 === 1 && count(30) === 3 && count(20) === 2 && count(10) === 3 && resistances && campaign.characterName.trim().length > 0,
+    summary: { attributes:campaign.attributesGenerated, masteries, weapon60, weapon40, thirty: count(30), twenty: count(20), ten: count(10), resistances },
   };
 }
 
