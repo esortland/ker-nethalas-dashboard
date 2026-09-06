@@ -11,6 +11,12 @@ describe("character reference data", () => {
     expect(names).toContain("Caustic Blade");
   });
 
+  it("includes setup data and page references for all 20 Gravebound core Masteries", () => {
+    const core = MASTERY_OPTIONS.filter(option => option.pages !== "Book of Masteries");
+    expect(core).toHaveLength(20);
+    expect(core.every(option => option.featureName && option.featureSummary && option.tierOneAbility && option.tierOneSummary)).toBe(true);
+  });
+
   it("explains every displayed character statistic", () => {
     expect(Object.values(RESOURCE_USES).every(Boolean)).toBe(true);
     expect(Object.values(RESISTANCE_USES)).toHaveLength(3);
