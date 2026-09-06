@@ -94,13 +94,15 @@ export interface Item {
 }
 
 export interface Campaign {
-  schemaVersion: 7;
+  schemaVersion: 8;
   id: string;
   name: string;
   characterName: string;
   characterCreated: boolean;
   descentReason: string;
   domainName: string;
+  rollStyle: "manual" | "digital";
+  domainSetup: { complete: boolean; overseerName: string; influence: string; lightChoice: "" | "lit" | "dark" };
   resources: Record<ResourceKey, Resource>;
   attributesGenerated: boolean;
   attributeRolls?: AttributeRolls;

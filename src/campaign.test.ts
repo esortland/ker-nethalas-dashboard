@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { addFeature, addItem, addRoom, advanceCombatTurn, applyDamageToEnemy, applyDamageToPlayer, checkTension, choosePercentile, confirmDamageToEnemy, equipItem, establishInitiative, generateAttributes, investigateFeature, inventoryUsage, itemSlots, makeCampaign, nextCombatRound, performCheck, performManualCheck, previewDamage, recoverAfterCombat, resolveExplorationRoll, resolveOpposed, resolveOutcome, updateResource, validateCharacterSetup } from "./campaign";
+import { addFeature, addItem, addRoom, advanceCombatTurn, applyDamageToEnemy, applyDamageToPlayer, checkTension, choosePercentile, confirmDamageToEnemy, equipItem, establishInitiative, generateAttributes, importCampaign, investigateFeature, inventoryUsage, itemSlots, makeCampaign, nextCombatRound, performCheck, performManualCheck, previewDamage, recoverAfterCombat, resolveExplorationRoll, resolveOpposed, resolveOutcome, rollUsageDie, updateResource, validateCharacterSetup, validatePlaySetup } from "./campaign";
 
 describe("campaign rules", () => {
   it("clamps resources", () => {
@@ -186,5 +186,42 @@ describe("campaign rules", () => {
     expect(campaign.combat.active).toBe(false);
     expect(campaign.combat.stage).toBe("setup");
     expect(campaign.combat.enemies).toEqual([]);
+  });
+  it("requires Domain, Overseer, Influence, and an intentional light choice", () => {
+    let campaign=makeCampaign();
+    campaign.domainName="The Ash Vault";
+    campaign.domainSetup={complete:false,overseerName:"The Ossuary King",influence:"Creatures gain +1 Armor",lightChoice:"lit"};
+    expect(validatePlaySetup(campaign).valid).toBe(false);
+    campaign.activeLightItemId=campaign.inventory.find(item=>item.kind==="light")!.id;
+    expect(validatePlaySetup(campaign).valid).toBe(true);
+    campaign={...campaign,activeLightItemId:undefined,domainSetup:{...campaign.domainSetup,lightChoice:"dark"}};
+    expect(validatePlaySetup(campaign).valid).toBe(true);
+  });
+  it("accepts physical Event usage-die results", () => {
+    const campaign=makeCampaign();
+    const result=rollUsageDie(campaign,2);
+    expect(result.result).toBe(2);
+    expect(result.campaign.eventDie).toBe(12);
+  });
+  it("migrates v0.7 saves into the playthrough preflight", () => {
+    const old:any={...makeCampaign(),schemaVersion:7};
+    delete old.rollStyle; delete old.domainSetup;
+    const campaign=importCampaign(old);
+    expect(campaign.schemaVersion).toBe(8);
+    expect(campaign.rollStyle).toBe("manual");
+    expect(campaign.domainSetup.complete).toBe(false);
+  });
+  it("clamps mistyped physical dice to the die being rolled", () => {
+    let campaign=resolveExplorationRoll(makeCampaign(),999);
+    expect(campaign.rooms[0].shapeRoll).toBe(100);
+    campaign={...campaign,explorationStep:"tension",tensionDie:8};
+    expect(checkTension(campaign,-4).tensionDie).toBe(6);
+  });
+  it("normalizes incomplete current-schema imports into a usable campaign", () => {
+    const input:any={...makeCampaign(),rooms:[],combat:{active:false},inventory:null};
+    const campaign=importCampaign(input);
+    expect(campaign.rooms).toHaveLength(1);
+    expect(campaign.inventory.length).toBeGreaterThan(0);
+    expect(campaign.combat.stage).toBe("setup");
   });
 });

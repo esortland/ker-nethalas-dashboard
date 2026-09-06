@@ -18,13 +18,15 @@ export function makeCampaign(): Campaign {
   const now = new Date().toISOString();
   const room: DomainRoom = { id: crypto.randomUUID(), number: 1, x: 0, y: 0, state: "entered", notes: "", tags: [], kind: "unknown", entryType: "passage", description: "", hasEncounter: false, eventDescription: "", scavengeUsed: false, deepSearchUsed: false, feature: { trapped: false, locked: false, resolved: true, type: "none" } };
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: crypto.randomUUID(),
     name: "The First Descent",
     characterName: "Unnamed Gravebound",
     characterCreated: false,
     descentReason: "",
     domainName: "Uncatalogued Domain",
+    rollStyle: "manual",
+    domainSetup: { complete:false, overseerName:"", influence:"", lightChoice:"" },
     resources: {
       health: { current: 13, max: 13 },
       toughness: { current: 30, max: 30 },
@@ -67,23 +69,38 @@ export function loadCampaign(): Campaign {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return makeCampaign();
   try {
-    const parsed = JSON.parse(raw) as Campaign & { schemaVersion: number };
-    if (parsed.schemaVersion === 7) return parsed;
-    if (parsed.schemaVersion === 6) return migrateV6(parsed);
-    if (parsed.schemaVersion === 5) return migrateV5(parsed);
-    if (parsed.schemaVersion === 4) return migrateV4(parsed);
-    if (parsed.schemaVersion === 3) return migrateV3(parsed);
-    if (parsed.schemaVersion === 2) return migrateV2({
+    return importCampaign(JSON.parse(raw));
+  } catch {
+    return makeCampaign();
+  }
+}
+
+export function importCampaign(input: unknown): Campaign {
+    const parsed = input as Campaign & { schemaVersion: number };
+    if (!parsed || typeof parsed !== "object" || !Number.isInteger(parsed.schemaVersion)) throw new Error("This file is not a Ker Nethalas campaign save.");
+    let campaign:Campaign;
+    if (parsed.schemaVersion === 8) campaign=parsed;
+    else if (parsed.schemaVersion === 7) campaign=migrateV7(parsed);
+    else if (parsed.schemaVersion === 6) campaign=migrateV6(parsed);
+    else if (parsed.schemaVersion === 5) campaign=migrateV5(parsed);
+    else if (parsed.schemaVersion === 4) campaign=migrateV4(parsed);
+    else if (parsed.schemaVersion === 3) campaign=migrateV3(parsed);
+    else if (parsed.schemaVersion === 2) campaign=migrateV2({
       ...parsed, skills: parsed.skills.map(skill => ({
         ...skill,
         startingBase: skill.startingBase ?? DEFAULT_SKILLS.find(candidate => candidate.id === skill.id)?.startingBase ?? 0,
       })),
     });
-    if (parsed.schemaVersion === 1) return migrateV1(parsed);
-    return makeCampaign();
-  } catch {
-    return makeCampaign();
-  }
+    else if (parsed.schemaVersion === 1) campaign=migrateV1(parsed);
+    else throw new Error(`Campaign schema ${parsed.schemaVersion} is not supported.`);
+    return normalizeCampaign(campaign);
+}
+
+function normalizeCampaign(input:any):Campaign {
+  const base=makeCampaign();
+  const rooms=Array.isArray(input.rooms)&&input.rooms.length?input.rooms.map(hydrateRoom):base.rooms;
+  const currentRoomId=rooms.some((room:DomainRoom)=>room.id===input.currentRoomId)?input.currentRoomId:rooms[0].id;
+  return { ...base,...input,schemaVersion:8,rollStyle:input.rollStyle==="digital"?"digital":"manual",domainSetup:{...base.domainSetup,...(input.domainSetup??{})},resources:{...base.resources,...(input.resources??{})},combat:{...freshCombat(),...(input.combat??{}),surpriseBonus:{...freshCombat().surpriseBonus,...(input.combat?.surpriseBonus??{})},enemyTurnsTaken:Array.isArray(input.combat?.enemyTurnsTaken)?input.combat.enemyTurnsTaken:[]},rooms,currentRoomId,inventory:Array.isArray(input.inventory)?input.inventory:base.inventory,equipment:input.equipment&&typeof input.equipment==="object"?input.equipment:{},skills:Array.isArray(input.skills)?input.skills:base.skills,masteries:Array.isArray(input.masteries)&&input.masteries.length===2?input.masteries:base.masteries,events:Array.isArray(input.events)?input.events:base.events };
 }
 
 function migrateV1(old: any): Campaign {
@@ -114,7 +131,12 @@ function migrateV5(old: any): Campaign {
 }
 
 function migrateV6(old: any): Campaign {
-  return { ...old, schemaVersion: 7, combat: { ...freshCombat(), ...(old.combat ?? {}), stage: old.combat?.active ? "turn" : "setup", initiativeSide: old.combat?.active ? old.combat?.actingSide ?? "player" : undefined, enemyTurnsTaken: [], surpriseAttempted: false, initiativePenalty: 0, surpriseBonus: { player: 0, enemy: 0 } } };
+  return migrateV7({ ...old, schemaVersion: 7, combat: { ...freshCombat(), ...(old.combat ?? {}), stage: old.combat?.active ? "turn" : "setup", initiativeSide: old.combat?.active ? old.combat?.actingSide ?? "player" : undefined, enemyTurnsTaken: [], surpriseAttempted: false, initiativePenalty: 0, surpriseBonus: { player: 0, enemy: 0 } } });
+}
+
+function migrateV7(old: any): Campaign {
+  const playStarted = Boolean(old.rooms?.some((room:any) => room.number > 1 || room.shapeRoll !== undefined));
+  return { ...old, schemaVersion:8, rollStyle:"manual", domainSetup:{ complete:playStarted, overseerName:"", influence:"", lightChoice:playStarted?(old.activeLightItemId?"lit":"dark"):"" } };
 }
 
 export function saveCampaign(campaign: Campaign) {
@@ -223,8 +245,10 @@ function stepUsageDie<T extends 4 | 6 | 8 | 10>(die: T, result: number): { die: 
   return { die: chain[chain.indexOf(die) + 1] as T, triggered: false };
 }
 
+const clampRoll=(result:number,sides:number)=>Math.max(1,Math.min(sides,Math.round(result)));
+
 export function checkTension(campaign: Campaign, forcedRoll?: number): Campaign {
-  const result = forcedRoll ?? rollDie(campaign.tensionDie);
+  const result = forcedRoll === undefined ? rollDie(campaign.tensionDie) : clampRoll(forcedRoll,campaign.tensionDie);
   const next = stepUsageDie(campaign.tensionDie, result);
   return log({ ...campaign, tensionDie: next.triggered ? 8 : next.die as Campaign["tensionDie"], growingDarknessPending: campaign.growingDarknessPending || next.triggered }, next.triggered ? "Tension broke: roll Growing Darkness; tension reset to d8." : `Tension die rolled ${result}; now d${next.die}.`);
 }
@@ -235,9 +259,9 @@ export function addFeature(campaign: Campaign, type: DomainRoom["feature"]["type
 
 export function investigateFeature(campaign: Campaign, perception: "passed" | "failed", rolls?: { difficulty?: number; trap?: number; lock?: number }): Campaign {
   const room = campaign.rooms.find(value => value.id === campaign.currentRoomId)!;
-  const difficultyRoll = rolls?.difficulty ?? rollDie(100);
-  const trapRoll = rolls?.trap ?? rollDie(10);
-  const lockRoll = room.feature.type === "door" || room.feature.type === "container" ? rolls?.lock ?? rollDie(20) : undefined;
+  const difficultyRoll = rolls?.difficulty === undefined ? rollDie(100) : clampRoll(rolls.difficulty,100);
+  const trapRoll = rolls?.trap === undefined ? rollDie(10) : clampRoll(rolls.trap,10);
+  const lockRoll = room.feature.type === "door" || room.feature.type === "container" ? rolls?.lock === undefined ? rollDie(20) : clampRoll(rolls.lock,20) : undefined;
   const trapped = trapRoll >= 7;
   const locked = room.feature.type === "door" ? (lockRoll ?? 0) >= 12 : room.feature.type === "container" ? (lockRoll ?? 0) >= 10 : false;
   const next = { ...campaign, rooms: campaign.rooms.map(value => value.id === room.id ? { ...value, feature: { ...value.feature, difficultyRoll, trapRoll, lockRoll, trapped, locked, perception } } : value) };
@@ -248,15 +272,15 @@ export function resolveExplorationRoll(campaign: Campaign, forcedRoll?: number):
   const room = campaign.rooms.find(value => value.id === campaign.currentRoomId)!;
   const patchRoom = (patch: Partial<DomainRoom>) => ({ ...campaign, rooms: campaign.rooms.map(value => value.id === room.id ? { ...value, ...patch } : value) });
   if (campaign.explorationStep === "shape") {
-    const roll = forcedRoll ?? rollDie(100); const kind = roll <= 25 ? "corridor" : "room";
+    const roll = forcedRoll === undefined ? rollDie(100) : clampRoll(forcedRoll,100); const kind = roll <= 25 ? "corridor" : "room";
     return log({ ...patchRoom({ shapeRoll: roll, kind }), explorationStep: "lair" }, `Room ${room.number}: shape roll ${roll}, ${kind}.`);
   }
   if (campaign.explorationStep === "lair") {
     if (campaign.lairFound) {
-      const result = forcedRoll ?? rollDie(campaign.exitDie); const next = stepUsageDie(campaign.exitDie, result);
+      const result = forcedRoll === undefined ? rollDie(campaign.exitDie) : clampRoll(forcedRoll,campaign.exitDie); const next = stepUsageDie(campaign.exitDie, result);
       return log({ ...patchRoom(next.triggered ? { kind: "exit" } : {}), exitDie: next.triggered ? 8 : next.die as Campaign["exitDie"], exitFound: campaign.exitFound || next.triggered, explorationStep: "tension" }, next.triggered ? "The Domain exit was found." : `Exit die rolled ${result}; now d${next.die}.`);
     }
-    const result = forcedRoll ?? rollDie(campaign.lairDie); const next = stepUsageDie(campaign.lairDie, result);
+    const result = forcedRoll === undefined ? rollDie(campaign.lairDie) : clampRoll(forcedRoll,campaign.lairDie); const next = stepUsageDie(campaign.lairDie, result);
     return log({ ...patchRoom(next.triggered ? { kind: "lair" } : {}), lairDie: next.triggered ? 10 : next.die as Campaign["lairDie"], lairFound: next.triggered, explorationStep: "tension" }, next.triggered ? "The Overseer's Lair was found." : `Lair die rolled ${result}; now d${next.die}.`);
   }
   if (campaign.explorationStep === "tension") {
@@ -264,13 +288,13 @@ export function resolveExplorationRoll(campaign: Campaign, forcedRoll?: number):
   }
   if (campaign.explorationStep === "encounter") {
     if (room.kind === "lair") return { ...campaign, explorationStep: "combat" };
-    const roll = forcedRoll ?? rollDie(20);
+    const roll = forcedRoll === undefined ? rollDie(20) : clampRoll(forcedRoll,20);
     const roomLike = room.kind === "room" || (room.kind === "exit" && (room.shapeRoll ?? 100) > 25);
     const hasEncounter = roomLike ? roll >= 10 : roll >= 15;
     return log({ ...patchRoom({ encounterRoll: roll, hasEncounter }), explorationStep: hasEncounter ? "combat" : room.kind === "room" || room.kind === "exit" ? "event" : "ready" }, hasEncounter ? `Encounter check ${roll}: combat encounter.` : `Encounter check ${roll}: clear.`);
   }
   if (campaign.explorationStep === "event") {
-    const roll = forcedRoll ?? rollDie(100);
+    const roll = forcedRoll === undefined ? rollDie(100) : clampRoll(forcedRoll,100);
     return log({ ...patchRoom({ eventRoll: roll }), explorationStep: "ready" }, `Event table roll: ${roll}.`);
   }
   return campaign;
@@ -406,8 +430,16 @@ export function validateCharacterSetup(campaign: Campaign) {
   };
 }
 
-export function rollUsageDie(campaign: Campaign): { campaign: Campaign; result: number; depleted: boolean } {
-  const result = rollDie(campaign.eventDie);
+export function validatePlaySetup(campaign: Campaign) {
+  const domainNamed=campaign.domainName.trim().length>0&&campaign.domainName!=="Uncatalogued Domain";
+  const overseer=campaign.domainSetup.overseerName.trim().length>0&&campaign.domainSetup.influence.trim().length>0;
+  const activeLight=campaign.inventory.some(item=>item.id===campaign.activeLightItemId&&item.kind==="light"&&item.quantity>0);
+  const light=campaign.domainSetup.lightChoice==="dark"||(campaign.domainSetup.lightChoice==="lit"&&activeLight);
+  return {valid:domainNamed&&overseer&&light,summary:{domainNamed,overseer,light,activeLight}};
+}
+
+export function rollUsageDie(campaign: Campaign, forcedRoll?:number): { campaign: Campaign; result: number; depleted: boolean } {
+  const result = forcedRoll === undefined ? rollDie(campaign.eventDie) : clampRoll(forcedRoll,campaign.eventDie);
   if (result > 2) return { campaign: log(campaign, `Event die d${campaign.eventDie}: ${result}.`), result, depleted: false };
   const chain = [20, 12, 10, 8, 6, 4] as const;
   const index = chain.indexOf(campaign.eventDie);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { addFeature, addItem, addRoom, changeItemQuantity, checkTension, enterRoom, equipItem, generateAttributes, hasItem, investigateFeature, inventoryUsage, loadCampaign, log, performCheck, resolveExplorationRoll, rollUsageDie, saveCampaign, updateResource, validateCharacterSetup } from "./campaign";
+import { addFeature, addItem, addRoom, changeItemQuantity, checkTension, enterRoom, equipItem, generateAttributes, hasItem, importCampaign, investigateFeature, inventoryUsage, loadCampaign, log, performCheck, resolveExplorationRoll, rollUsageDie, saveCampaign, updateResource, validateCharacterSetup, validatePlaySetup } from "./campaign";
 import type { AttributeRolls, Campaign, CheckMode, Direction, DomainRoom, EquipmentSlot, Item, ItemWeight, ResourceKey, Skill } from "./types";
 import { Combat } from "./Combat";
 import { QUICK_RULES } from "./rules";
@@ -40,16 +40,20 @@ export function App() {
   const [activeTab, setActiveTab] = useState<"explore" | "combat" | "character" | "inventory" | "journal">(campaign.characterCreated ? "explore" : "character");
   const [showGuide, setShowGuide] = useState(true);
   const [rollMessage, setRollMessage] = useState("");
+  const [undoCampaign, setUndoCampaign] = useState<Campaign|null>(null);
 
   useEffect(() => saveCampaign(campaign), [campaign]);
   const currentRoom = campaign.rooms.find((room) => room.id === campaign.currentRoomId)!;
+  const setupPending=campaign.characterCreated&&!campaign.domainSetup.complete;
   const guide = !campaign.characterCreated ? { title:"Create your Gravebound", text:"Name your character, record why they entered Ker Nethalas, assign the listed skill allotments and set resistances to 40 / 20 / 20. Every requirement turns green when complete.", page:"19–20" } : activeTab === "explore" ? explorationGuidance[campaign.explorationStep] : activeTab === "combat" ? combatGuidance(campaign) : guidance[campaign.phase];
 
-  function changeResource(key: ResourceKey, delta: number) { setCampaign((value) => updateResource(value, key, delta)); }
-  function travel(direction: Direction, entryType: "passage" | "door") { setCampaign((value) => addRoom(value, direction, entryType)); setShowGuide(true); }
-  function usageRoll() {
-    setCampaign((value) => {
-      const result = rollUsageDie(value);
+  function updateCampaign(next:Campaign|((value:Campaign)=>Campaign)) { setUndoCampaign(campaign); setCampaign(current=>typeof next==="function"?next(current):next); }
+
+  function changeResource(key: ResourceKey, delta: number) { updateCampaign((value) => updateResource(value, key, delta)); }
+  function travel(direction: Direction, entryType: "passage" | "door") { updateCampaign((value) => addRoom(value, direction, entryType)); setShowGuide(true); }
+  function usageRoll(forcedRoll?:number) {
+    updateCampaign((value) => {
+      const result = rollUsageDie(value,forcedRoll);
       setRollMessage(`d${value.eventDie} → ${result.result}${result.depleted ? " · EVENT" : ""}`);
       return result.campaign;
     });
@@ -66,31 +70,39 @@ export function App() {
     const link = document.createElement("a"); link.href = href; link.download = `${campaign.name.replace(/\W+/g, "-").toLowerCase()}.json`; link.click();
     URL.revokeObjectURL(href);
   }
+  async function importSave(file?:File) {
+    if(!file)return;
+    try { const next=importCampaign(JSON.parse(await file.text())); updateCampaign(log(next,"Campaign save imported.")); setActiveTab(next.characterCreated?"explore":"character"); setShowGuide(true); }
+    catch(error){ alert(error instanceof Error?error.message:"That campaign file could not be imported."); }
+  }
+  function undo(){ if(!undoCampaign)return; setCampaign(undoCampaign); setUndoCampaign(null); saveCampaign(undoCampaign); setRollMessage(""); }
 
   return <main className="app-shell">
     <header className="masthead">
-      <div><p className="eyebrow">GRAVEBOUND COMPANION · v0.7</p><h1>{campaign.domainName}</h1><p>{campaign.characterName} · Room {currentRoom.number}</p></div>
-      <div className="save-tools"><span className="saved">◆ Autosaved</span><button onClick={exportSave}>Export</button><button onClick={reset}>New campaign</button></div>
+      <div><p className="eyebrow">GRAVEBOUND COMPANION · v0.8</p><h1>{campaign.domainName}</h1><p>{campaign.characterName} · Room {currentRoom.number}</p></div>
+      <div className="save-tools"><span className="saved">◆ Autosaved</span><button disabled={!undoCampaign} onClick={undo}>Undo</button><button onClick={exportSave}>Export</button><label className="import-save">Import<input type="file" accept="application/json,.json" onChange={event=>{void importSave(event.target.files?.[0]);event.currentTarget.value=""}}/></label><button onClick={reset}>New campaign</button></div>
     </header>
 
     <section className="resource-bar">
       {(Object.keys(resourceLabels) as ResourceKey[]).map((key) => <ResourceControl key={key} name={resourceLabels[key]} resource={campaign.resources[key]} onChange={(delta) => changeResource(key, delta)} />)}
-      <button className="event-die" onClick={usageRoll}><small>EVENT DIE</small><strong>d{campaign.eventDie}</strong><span>{rollMessage || "roll usage"}</span></button>
+      <EventDieControl campaign={campaign} message={rollMessage} onRoll={usageRoll}/>
     </section>
 
-    <nav className="tabs">
+    {setupPending&&<PlaySetup campaign={campaign} onUpdate={updateCampaign} onComplete={()=>{setActiveTab("explore");setShowGuide(true)}}/>}
+
+    <nav className="tabs" hidden={setupPending}>
       {(["explore", "combat", "character", "inventory", "journal"] as const).map((tab) => <button key={tab} disabled={!campaign.characterCreated && tab !== "character"} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>{tab}</button>)}
       <button className="guide-button" onClick={() => setShowGuide((value) => !value)}>✦ What do I do now?</button>
     </nav>
 
-    {showGuide && <aside className="guidance"><div><span>NEXT PROCEDURE</span><h2>{guide.title}</h2><p>{guide.text}</p></div><div className="guidance-actions">{!campaign.characterCreated ? <small>Complete the checklist below<br/>Reference: pages {guide.page}</small> : <>{activeTab === "explore" && campaign.explorationStep !== "combat" && campaign.explorationStep !== "ready" ? <button onClick={() => setCampaign(resolveExplorationRoll(campaign))}>Roll & continue</button> : activeTab === "explore" && campaign.explorationStep === "combat" ? <button onClick={() => setActiveTab("combat")}>Open combat dashboard</button> : activeTab !== "combat" ? <button onClick={() => setCampaign((value) => ({ ...value, phase: value.phase === "enter" ? "resolve" : "explore" }))}>Mark step resolved</button> : null}<small>Reference: pages {guide.page}</small></>}</div></aside>}
+    {!setupPending&&showGuide && <aside className="guidance"><div><span>NEXT PROCEDURE</span><h2>{guide.title}</h2><p>{guide.text}</p></div><div className="guidance-actions">{!campaign.characterCreated ? <small>Complete the checklist below<br/>Reference: pages {guide.page}</small> : <>{activeTab === "explore" && campaign.explorationStep !== "combat" && campaign.explorationStep !== "ready" ? <ExplorationRollControl key={campaign.explorationStep} campaign={campaign} onUpdate={updateCampaign}/> : activeTab === "explore" && campaign.explorationStep === "combat" ? <button onClick={() => setActiveTab("combat")}>Open combat dashboard</button> : activeTab !== "combat" ? <button onClick={() => updateCampaign((value) => ({ ...value, phase: value.phase === "enter" ? "resolve" : "explore" }))}>Mark step resolved</button> : null}<small>Reference: pages {guide.page}</small></>}</div></aside>}
 
-    <details className="rules-drawer"><summary>Rules quick reference · pages for this screen</summary><div>{QUICK_RULES[activeTab].map(rule=><article key={rule.title}><PageRef pages={rule.page}/><strong>{rule.title}</strong><p>{rule.summary}</p></article>)}</div></details>
-    {activeTab === "explore" && <Explore campaign={campaign} currentRoom={currentRoom} onTravel={travel} onUpdate={setCampaign} />}
-    {activeTab === "combat" && <Combat campaign={campaign} onUpdate={setCampaign} onFinish={(resolved) => { setCampaign(log({ ...resolved, explorationStep:"ready", rooms:resolved.rooms.map(room=>room.id===resolved.currentRoomId?{...room,hasEncounter:false,state:"cleared"}:room) },"Combat resolved; room cleared.")); setActiveTab("explore"); }} />}
-    {activeTab === "character" && <Character campaign={campaign} onUpdate={setCampaign} onComplete={() => { setActiveTab("explore"); setShowGuide(true); }} />}
-    {activeTab === "inventory" && <Inventory campaign={campaign} onUpdate={setCampaign} />}
-    {activeTab === "journal" && <Journal campaign={campaign} />}
+    {!setupPending&&<details className="rules-drawer"><summary>Rules quick reference · pages for this screen</summary><div>{QUICK_RULES[activeTab].map(rule=><article key={rule.title}><PageRef pages={rule.page}/><strong>{rule.title}</strong><p>{rule.summary}</p></article>)}</div></details>}
+    {!setupPending&&activeTab === "explore" && <Explore campaign={campaign} currentRoom={currentRoom} onTravel={travel} onUpdate={updateCampaign} />}
+    {!setupPending&&activeTab === "combat" && <Combat campaign={campaign} onUpdate={updateCampaign} onFinish={(resolved) => { updateCampaign(log({ ...resolved, explorationStep:"ready", rooms:resolved.rooms.map(room=>room.id===resolved.currentRoomId?{...room,hasEncounter:false,state:"cleared"}:room) },"Combat resolved; room cleared.")); setActiveTab("explore"); }} />}
+    {!setupPending&&activeTab === "character" && <Character campaign={campaign} onUpdate={updateCampaign} onComplete={() => { setActiveTab("explore"); setShowGuide(true); }} />}
+    {!setupPending&&activeTab === "inventory" && <Inventory campaign={campaign} onUpdate={updateCampaign} />}
+    {!setupPending&&activeTab === "journal" && <Journal campaign={campaign} />}
   </main>;
 }
 
@@ -100,26 +112,66 @@ function ResourceControl({ name, resource, onChange }: { name: string; resource:
 
 function PageRef({ pages }: { pages: string }) { return <span className="page-ref">BOOK · {pages}</span>; }
 
+function EventDieControl({campaign,message,onRoll}:{campaign:Campaign;message:string;onRoll:(roll?:number)=>void}){
+  const [manual,setManual]=useState(1);
+  return <div className="event-die event-control"><small>EVENT DIE</small><strong>d{campaign.eventDie}</strong>{campaign.rollStyle==="manual"?<div><input aria-label="Event die result" type="number" min="1" max={campaign.eventDie} value={manual} onChange={event=>setManual(Number(event.target.value))}/><button onClick={()=>onRoll(Math.max(1,Math.min(campaign.eventDie,manual)))}>Apply</button></div>:<button onClick={()=>onRoll()}>Roll usage</button>}<span>{message||(campaign.rollStyle==="manual"?"enter your result":"ready")}</span></div>;
+}
+
+function ExplorationRollControl({campaign,onUpdate}:{campaign:Campaign;onUpdate:(campaign:Campaign)=>void}){
+  const [manual,setManual]=useState(1);
+  const step=campaign.explorationStep;
+  const sides=step==="shape"||step==="event"?100:step==="encounter"?20:step==="tension"?campaign.tensionDie:campaign.lairFound?campaign.exitDie:campaign.lairDie;
+  const label=step==="lair"?campaign.lairFound?"Exit usage die":"Lair usage die":step;
+  const apply=()=>onUpdate(resolveExplorationRoll(campaign,campaign.rollStyle==="manual"?Math.max(1,Math.min(sides,manual)):undefined));
+  return <div className="procedure-roll"><div className="roll-toggle"><button className={campaign.rollStyle==="manual"?"active":""} onClick={()=>onUpdate({...campaign,rollStyle:"manual"})}>I roll</button><button className={campaign.rollStyle==="digital"?"active":""} onClick={()=>onUpdate({...campaign,rollStyle:"digital"})}>Roll for me</button></div>{campaign.rollStyle==="manual"?<label>{label} · d{sides}<input type="number" min="1" max={sides} value={manual} onChange={event=>setManual(Number(event.target.value))}/><button onClick={apply}>Apply & continue</button></label>:<button onClick={apply}>Roll d{sides} & continue</button>}</div>;
+}
+
+function PlaySetup({campaign,onUpdate,onComplete}:{campaign:Campaign;onUpdate:(campaign:Campaign)=>void;onComplete:()=>void}){
+  const [weaponName,setWeaponName]=useState("");
+  const lights=campaign.inventory.filter(item=>item.kind==="light"&&item.quantity>0);
+  const activeLight=lights.some(item=>item.id===campaign.activeLightItemId);
+  const weapon=campaign.inventory.find(item=>item.id===campaign.equipment.mainHand&&item.kind==="weapon");
+  const setup=validatePlaySetup(campaign), domainNamed=setup.summary.domainNamed, overseerReady=setup.summary.overseer, lightReady=setup.summary.light, ready=setup.valid;
+  const addWeapon=()=>{ if(!weaponName.trim())return; const next=addItem(campaign,{name:weaponName.trim(),quantity:1,weight:"normal",kind:"weapon",traits:[],notes:"Base non-magical weapon Damage Pool: d6",twoHanded:false,armor:0}); const item=next.inventory.at(-1)!; onUpdate(equipItem(next,item.id,"mainHand")); setWeaponName(""); };
+  const finish=()=>{ if(!ready)return; onUpdate(log({...campaign,domainSetup:{...campaign.domainSetup,complete:true}},`Domain prepared: ${campaign.domainName}, ruled by ${campaign.domainSetup.overseerName}; influence: ${campaign.domainSetup.influence}.`)); onComplete(); };
+  return <section className="setup-workspace">
+    <div className="panel setup-main"><div className="section-kicker"><span>PLAYTHROUGH PREFLIGHT</span><PageRef pages="96, 100, 179"/></div><h2>Prepare the first Domain</h2><p>These are the details the rules require before generating the starting location. The dashboard records the results; you still roll and interpret the book’s tables.</p>
+      <label>Campaign name<input value={campaign.name} onChange={event=>onUpdate({...campaign,name:event.target.value})}/></label>
+      <label>First Domain<input value={campaign.domainName} onChange={event=>onUpdate({...campaign,domainName:event.target.value})}/></label>
+      <label>Overseer <small>Determine on page 179</small><input placeholder="Name or result" value={campaign.domainSetup.overseerName} onChange={event=>onUpdate({...campaign,domainSetup:{...campaign.domainSetup,overseerName:event.target.value}})}/></label>
+      <label>Overseer Influence <small>Roll once on page 100</small><textarea placeholder="Record the modifier applied to creatures in this Domain" value={campaign.domainSetup.influence} onChange={event=>onUpdate({...campaign,domainSetup:{...campaign.domainSetup,influence:event.target.value}})}/></label>
+    </div>
+    <aside className="panel setup-side"><div className="section-kicker"><span>LIGHT & GEAR</span><PageRef pages="96, 206–212"/></div><h2>What enters the dark?</h2><label>Active lightsource<select value={activeLight?campaign.activeLightItemId:""} onChange={event=>{const id=event.target.value||undefined;onUpdate(log({...campaign,activeLightItemId:id,lightRemaining:id?20:0,domainSetup:{...campaign.domainSetup,lightChoice:id?"lit":""}},id?"Lightsource prepared for 20 rooms.":"Lightsource choice cleared."))}}><option value="">Choose a light…</option>{lights.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className={campaign.domainSetup.lightChoice==="dark"?"active":""} onClick={()=>onUpdate(log({...campaign,activeLightItemId:undefined,lightRemaining:0,domainSetup:{...campaign.domainSetup,lightChoice:"dark"}},"Entering without a lightsource: Blinded; Resolve checks required on entry."))}>Deliberately enter in darkness</button><p className="setup-note">A Torch or Lamp needs a free hand. Without light you are Blinded and must check Resolve whenever entering a room or lose 1 Sanity.</p>
+      <label>Starting weapon<div className="inline-add"><input placeholder="Weapon from your setup" value={weaponName} onChange={event=>setWeaponName(event.target.value)}/><button onClick={addWeapon}>Add & equip</button></div></label><p className="setup-note">{weapon?`${weapon.name} equipped in main hand.`:"No weapon equipped; Unarmed Combat remains available."}</p>
+      <div className="roll-preference"><span>ROLL PREFERENCE</span><button className={campaign.rollStyle==="manual"?"active":""} onClick={()=>onUpdate({...campaign,rollStyle:"manual"})}>I roll physical dice</button><button className={campaign.rollStyle==="digital"?"active":""} onClick={()=>onUpdate({...campaign,rollStyle:"digital"})}>Roll digitally</button></div>
+    </aside>
+    <div className="panel readiness"><span>READY CHECK</span><ul><li className={domainNamed?"done":""}>First Domain named</li><li className={overseerReady?"done":""}>Overseer and Influence recorded</li><li className={lightReady?"done":""}>Lightsource—or deliberate darkness—chosen</li><li className={weapon?"done":""}>Weapon equipped <small>(recommended; not required)</small></li></ul><button disabled={!ready} onClick={finish}>Begin the first Domain</button></div>
+  </section>;
+}
+
 function Explore({ campaign, currentRoom, onTravel, onUpdate }: { campaign: Campaign; currentRoom: DomainRoom; onTravel: (direction: Direction, entryType: "passage" | "door") => void; onUpdate: (campaign: Campaign) => void }) {
   const [entryType, setEntryType] = useState<"passage" | "door">("passage");
+  const [deepTensionRoll,setDeepTensionRoll]=useState(1);
+  const [featureRolls,setFeatureRolls]=useState({difficulty:1,trap:1,lock:1});
   const bounds = useMemo(() => ({ minX: Math.min(...campaign.rooms.map(r => r.x)), minY: Math.min(...campaign.rooms.map(r => r.y)) }), [campaign.rooms]);
   return <section className="workspace">
     <div className="map-panel panel">
       <div className="panel-heading"><div><span>DOMAIN MAP</span><h2>{campaign.domainName}</h2></div><div className="domain-dice"><b className={campaign.lightRemaining === 0 ? "danger-text" : ""}>LIGHT {campaign.lightRemaining}/20</b><b>TENSION d{campaign.tensionDie}</b><b>{campaign.lairFound ? `EXIT d${campaign.exitDie}` : `LAIR d${campaign.lairDie}`}</b></div></div>
       <div className="map-canvas">
-        {campaign.rooms.map((room) => <button key={room.id} className={`room ${room.id === currentRoom.id ? "current" : ""} ${room.state}`} style={{ left: 280 + (room.x - bounds.minX) * 110, top: 200 + (room.y - bounds.minY) * 90 }} onClick={() => onUpdate(enterRoom(campaign, room.id))}><span>{room.number}</span><small>{room.kind} · {room.state}</small></button>)}
+        {campaign.rooms.map((room) => <button disabled={room.id!==currentRoom.id&&campaign.explorationStep!=="ready"} key={room.id} className={`room ${room.id === currentRoom.id ? "current" : ""} ${room.state}`} style={{ left: 280 + (room.x - bounds.minX) * 110, top: 200 + (room.y - bounds.minY) * 90 }} onClick={() => onUpdate(enterRoom(campaign, room.id))}><span>{room.number}</span><small>{room.kind} · {room.state}</small></button>)}
       </div>
     </div>
     <aside className="room-panel panel">
       <span>CURRENT LOCATION</span><h2>Room {currentRoom.number} · {currentRoom.kind}</h2>
+      <div className="domain-context"><div><small>OVERSEER</small><strong>{campaign.domainSetup.overseerName}</strong><p>{campaign.domainSetup.influence}</p></div><button onClick={()=>onUpdate({...campaign,domainSetup:{...campaign.domainSetup,complete:false}})}>Edit setup</button></div>
       <div className="procedure-meter">{["shape","lair","tension","encounter","event","ready"].map(step => <i key={step} className={campaign.explorationStep === step ? "active" : ""}>{step}</i>)}</div>
       {campaign.growingDarknessPending && <div className="warning"><strong>Growing Darkness triggered</strong><input placeholder="Record the table result…" onKeyDown={event => { if(event.key === "Enter" && event.currentTarget.value) onUpdate(log({ ...campaign, growingDarknessPending: false, growingDarkness: [...campaign.growingDarkness, event.currentTarget.value] }, `Growing Darkness: ${event.currentTarget.value}`)); }} /></div>}
       <label>Next connection<select value={entryType} onChange={event => setEntryType(event.target.value as "passage" | "door")}><option value="passage">Open passage</option><option value="door">Door</option></select></label>
-      <div className="direction-grid"><button onClick={() => onTravel("north", entryType)}>↑ North</button><button onClick={() => onTravel("west", entryType)}>← West</button><i>◆</i><button onClick={() => onTravel("east", entryType)}>East →</button><button onClick={() => onTravel("south", entryType)}>↓ South</button></div>
+      <div className="direction-grid"><button disabled={campaign.explorationStep!=="ready"} onClick={() => onTravel("north", entryType)}>↑ North</button><button disabled={campaign.explorationStep!=="ready"} onClick={() => onTravel("west", entryType)}>← West</button><i>◆</i><button disabled={campaign.explorationStep!=="ready"} onClick={() => onTravel("east", entryType)}>East →</button><button disabled={campaign.explorationStep!=="ready"} onClick={() => onTravel("south", entryType)}>↓ South</button></div>{campaign.explorationStep!=="ready"&&<small className="route-lock">Resolve the current location before moving on.</small>}
       <div className="location-rolls"><small>SHAPE {currentRoom.shapeRoll ?? "—"}</small><small>ENCOUNTER {currentRoom.encounterRoll ?? "—"}</small><small>EVENT {currentRoom.eventRoll ?? "—"}</small></div>
       {currentRoom.eventRoll && <label>Event result<textarea value={currentRoom.eventDescription} placeholder={`Look up roll ${currentRoom.eventRoll} and record the result…`} onChange={event => onUpdate({ ...campaign, rooms: campaign.rooms.map(room => room.id === currentRoom.id ? { ...room, eventDescription: event.target.value } : room) })} /></label>}
-      {campaign.explorationStep === "ready" && <div className="room-actions"><button disabled={currentRoom.scavengeUsed} onClick={() => onUpdate(log({ ...campaign, rooms: campaign.rooms.map(room => room.id === currentRoom.id ? { ...room, scavengeUsed: true } : room) }, `Scavenge attempt used in Room ${currentRoom.number}.`))}>Scavenge {currentRoom.scavengeUsed ? "used" : "once"}</button><button disabled={currentRoom.deepSearchUsed} onClick={() => { const searched = { ...campaign, resources: { ...campaign.resources, exhaustion: { ...campaign.resources.exhaustion, current: Math.min(campaign.resources.exhaustion.max, campaign.resources.exhaustion.current + 2) } }, rooms: campaign.rooms.map(room => room.id === currentRoom.id ? { ...room, deepSearchUsed: true } : room) }; onUpdate(log(checkTension(searched), `Deep search in Room ${currentRoom.number}: +2 Exhaustion.`)); }}>Deep search</button></div>}
-      {campaign.explorationStep === "ready" && <div className="feature-panel"><label>Feature<select value={currentRoom.feature.type} onChange={event => onUpdate(addFeature(campaign, event.target.value as DomainRoom["feature"]["type"]))}><option value="none">None</option><option value="door">Door</option><option value="container">Container</option><option value="environment">Environmental feature</option></select></label>{currentRoom.feature.type !== "none" && <>{!currentRoom.feature.perception ? <div className="feature-actions"><p>Roll the Random Difficulty table, then make a Perception check. Record whether it passed.</p><button onClick={() => onUpdate(investigateFeature(campaign, "passed"))}>Perception passed</button><button onClick={() => onUpdate(investigateFeature(campaign, "failed"))}>Perception failed</button></div> : <div className="feature-result"><b>{currentRoom.feature.trapped ? currentRoom.feature.perception === "passed" ? "Trap detected" : "Trap triggered if you interact" : "No trap"}</b>{currentRoom.feature.lockRoll !== undefined && <b>{currentRoom.feature.locked ? "Locked" : "Unlocked"}</b>}<small>Difficulty d100: {currentRoom.feature.difficultyRoll} · Trap d10: {currentRoom.feature.trapRoll}{currentRoom.feature.lockRoll !== undefined ? ` · Lock d20: ${currentRoom.feature.lockRoll}` : ""}</small><p>{currentRoom.feature.trapped ? `${hasItem(campaign,"Thieves’ Tools") ? "Thieves’ Tools available." : "No Thieves’ Tools carried."} Disarm, bypass, trigger deliberately, or leave it.` : currentRoom.feature.locked ? `${hasItem(campaign,"Lockpick") ? "Lockpick available." : "No Lockpick carried."} Pick the lock, brute-force it (and check Tension), or leave it.` : "The feature can be interacted with safely."}</p><button onClick={() => onUpdate(log({ ...campaign, rooms: campaign.rooms.map(room => room.id === currentRoom.id ? { ...room, feature: { ...room.feature, resolved: true, trapped: false, locked: false } } : room) }, `${currentRoom.feature.type} resolved.`))}>Mark resolved</button></div>}</>}</div>}
+      {campaign.explorationStep === "ready" && <div className="room-actions"><button disabled={currentRoom.scavengeUsed} onClick={() => onUpdate(log({ ...campaign, rooms: campaign.rooms.map(room => room.id === currentRoom.id ? { ...room, scavengeUsed: true } : room) }, `Scavenge attempt used in Room ${currentRoom.number}.`))}>Scavenge {currentRoom.scavengeUsed ? "used" : "once"}</button>{campaign.rollStyle==="manual"&&<label>Tension d{campaign.tensionDie}<input type="number" min="1" max={campaign.tensionDie} value={deepTensionRoll} onChange={event=>setDeepTensionRoll(Number(event.target.value))}/></label>}<button disabled={currentRoom.deepSearchUsed} onClick={() => { const searched = { ...campaign, resources: { ...campaign.resources, exhaustion: { ...campaign.resources.exhaustion, current: Math.min(campaign.resources.exhaustion.max, campaign.resources.exhaustion.current + 2) } }, rooms: campaign.rooms.map(room => room.id === currentRoom.id ? { ...room, deepSearchUsed: true } : room) }; onUpdate(log(checkTension(searched,campaign.rollStyle==="manual"?deepTensionRoll:undefined), `Deep search in Room ${currentRoom.number}: +2 Exhaustion.`)); }}>Deep search</button></div>}
+      {campaign.explorationStep === "ready" && <div className="feature-panel"><label>Feature<select value={currentRoom.feature.type} onChange={event => onUpdate(addFeature(campaign, event.target.value as DomainRoom["feature"]["type"]))}><option value="none">None</option><option value="door">Door</option><option value="container">Container</option><option value="environment">Environmental feature</option></select></label>{currentRoom.feature.type !== "none" && <>{!currentRoom.feature.perception ? <div className="feature-actions"><p>Roll the Random Difficulty table, then make a Perception check. Record whether it passed.</p>{campaign.rollStyle==="manual"&&<div className="feature-roll-inputs"><label>Difficulty d100<input type="number" min="1" max="100" value={featureRolls.difficulty} onChange={event=>setFeatureRolls({...featureRolls,difficulty:Number(event.target.value)})}/></label><label>Trap d10<input type="number" min="1" max="10" value={featureRolls.trap} onChange={event=>setFeatureRolls({...featureRolls,trap:Number(event.target.value)})}/></label>{(currentRoom.feature.type==="door"||currentRoom.feature.type==="container")&&<label>Lock d20<input type="number" min="1" max="20" value={featureRolls.lock} onChange={event=>setFeatureRolls({...featureRolls,lock:Number(event.target.value)})}/></label>}</div>}<button onClick={() => onUpdate(investigateFeature(campaign, "passed",campaign.rollStyle==="manual"?featureRolls:undefined))}>Perception passed</button><button onClick={() => onUpdate(investigateFeature(campaign, "failed",campaign.rollStyle==="manual"?featureRolls:undefined))}>Perception failed</button></div> : <div className="feature-result"><b>{currentRoom.feature.trapped ? currentRoom.feature.perception === "passed" ? "Trap detected" : "Trap triggered if you interact" : "No trap"}</b>{currentRoom.feature.lockRoll !== undefined && <b>{currentRoom.feature.locked ? "Locked" : "Unlocked"}</b>}<small>Difficulty d100: {currentRoom.feature.difficultyRoll} · Trap d10: {currentRoom.feature.trapRoll}{currentRoom.feature.lockRoll !== undefined ? ` · Lock d20: ${currentRoom.feature.lockRoll}` : ""}</small><p>{currentRoom.feature.trapped ? `${hasItem(campaign,"Thieves’ Tools") ? "Thieves’ Tools available." : "No Thieves’ Tools carried."} Disarm, bypass, trigger deliberately, or leave it.` : currentRoom.feature.locked ? `${hasItem(campaign,"Lockpick") ? "Lockpick available." : "No Lockpick carried."} Pick the lock, brute-force it (and check Tension), or leave it.` : "The feature can be interacted with safely."}</p><button onClick={() => onUpdate(log({ ...campaign, rooms: campaign.rooms.map(room => room.id === currentRoom.id ? { ...room, feature: { ...room.feature, resolved: true, trapped: false, locked: false } } : room) }, `${currentRoom.feature.type} resolved.`))}>Mark resolved</button></div>}</>}</div>}
       <label>Room state<select value={currentRoom.state} onChange={(event) => onUpdate({ ...campaign, rooms: campaign.rooms.map(room => room.id === currentRoom.id ? { ...room, state: event.target.value as DomainRoom["state"] } : room) })}><option value="entered">Entered</option><option value="searched">Searched</option><option value="cleared">Cleared</option><option value="dangerous">Dangerous</option><option value="camp">Camp</option></select></label>
       <label>Field notes<textarea value={currentRoom.notes} placeholder="What did you find here?" onChange={(event) => onUpdate({ ...campaign, rooms: campaign.rooms.map(room => room.id === currentRoom.id ? { ...room, notes: event.target.value } : room) })} /></label>
     </aside>

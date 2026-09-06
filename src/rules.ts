@@ -8,6 +8,8 @@ export const QUICK_RULES: Record<"explore"|"combat"|"character"|"inventory"|"jou
     { title:"Improvement", page:"62", summary:"Doubles on a Skill check allow that Skill to be marked once for improvement at camp." },
   ],
   explore: [
+    { title:"First Domain", page:"96, 100, 179", summary:"Determine the Domain’s Overseer and roll its Influence once before generating the starting location." },
+    { title:"Lightsource", page:"96", summary:"A Torch or Lamp lasts 20 rooms and needs a free hand. Without light you are Blinded and check Resolve on room entry." },
     { title:"New location", page:"96–99", summary:"Determine shape, check for the Lair or Exit, roll Tension, then check the encounter and room event." },
     { title:"Tension", page:"120", summary:"Roll on movement, noise, or a specified trigger. A depleted d4 triggers Growing Darkness and resets to d8." },
     { title:"Scavenge", page:"99", summary:"A cleared location may be scavenged once, with one optional deep search." },
