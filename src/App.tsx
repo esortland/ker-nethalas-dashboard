@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { addFeature, addItem, addRoom, changeItemQuantity, checkTension, enterRoom, equipItem, generateAttributes, hasItem, importCampaign, investigateFeature, inventoryUsage, loadCampaign, log, markImprovementsFromChecks, performCheck, performManualCheck, resolveExplorationRoll, resolveUnknownFeatureInteraction, rollUsageDie, saveCampaign, updateResource, validateCharacterSetup, validatePlaySetup } from "./campaign";
 import type { AttributeRolls, Campaign, CheckMode, Direction, DomainRoom, EquipmentSlot, Item, ItemWeight, ResourceKey, Skill } from "./types";
 import { Combat } from "./Combat";
@@ -156,11 +156,11 @@ function PlaySetup({campaign,onUpdate,onComplete}:{campaign:Campaign;onUpdate:(c
 function Explore({ campaign, currentRoom, onTravel, onUpdate }: { campaign: Campaign; currentRoom: DomainRoom; onTravel: (direction: Direction, entryType: "passage" | "door") => void; onUpdate: (campaign: Campaign) => void }) {
   const [entryType, setEntryType] = useState<"passage" | "door">("passage");
   const [deepTensionRoll,setDeepTensionRoll]=useState(1);
-  const [featureRolls,setFeatureRolls]=useState({difficulty:1,trap:1,lock:1});
+  const [featureRolls,setFeatureRolls]=useState({difficulty:1,trap:1,lock:1});\n  const [mapZoom,setMapZoom]=useState(1);\n  const mapRef=useRef<HTMLDivElement>(null);
   const bounds = useMemo(() => ({ minX: Math.min(...campaign.rooms.map(r => r.x)), minY: Math.min(...campaign.rooms.map(r => r.y)) }), [campaign.rooms]);
   return <section className="workspace">
     <div className="map-panel panel">
-      <div className="panel-heading"><div><span>DOMAIN MAP</span><h2>{campaign.domainName}</h2></div><div className="domain-dice"><b className={campaign.lightRemaining === 0 ? "danger-text" : ""}>LIGHT {campaign.lightRemaining}/20</b><b>TENSION d{campaign.tensionDie}</b><b>{campaign.lairFound ? `EXIT d${campaign.exitDie}` : `LAIR d${campaign.lairDie}`}</b></div></div>
+      <div className="panel-heading"><div><span>DOMAIN MAP</span><h2>{campaign.domainName}</h2></div><div className="map-controls"><button aria-label="Zoom out map" onClick={()=>setMapZoom(value=>Math.max(.7,Number((value-.1).toFixed(1))))}>−</button><button aria-label="Reset map zoom" onClick={()=>setMapZoom(1)}>{Math.round(mapZoom*100)}%</button><button aria-label="Zoom in map" onClick={()=>setMapZoom(value=>Math.min(1.6,Number((value+.1).toFixed(1))))}>+</button><button onClick={()=>mapRef.current?.querySelector<HTMLElement>(".room.current")?.scrollIntoView({behavior:"smooth",block:"center",inline:"center"})}>Center</button></div><div className="domain-dice"><b className={campaign.lightRemaining === 0 ? "danger-text" : ""}>LIGHT {campaign.lightRemaining}/20</b><b>TENSION d{campaign.tensionDie}</b><b>{campaign.lairFound ? `EXIT d${campaign.exitDie}` : `LAIR d${campaign.lairDie}`}</b></div></div>
       <div className="map-canvas">
         {campaign.rooms.map((room) => <button disabled={room.id!==currentRoom.id&&campaign.explorationStep!=="ready"} key={room.id} className={`room ${room.id === currentRoom.id ? "current" : ""} ${room.state}`} style={{ left: 280 + (room.x - bounds.minX) * 110, top: 200 + (room.y - bounds.minY) * 90 }} onClick={() => onUpdate(enterRoom(campaign, room.id))}><span>{room.number}</span><small>{room.kind} · {room.state}</small></button>)}
       </div>
