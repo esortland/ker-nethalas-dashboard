@@ -2,7 +2,7 @@
 
 An extension-first solo campaign companion. The application owns campaign state and the internal Domain map; Owlbear Rodeo is a host rather than a gameplay dependency.
 
-## Milestone 0.5
+## Milestone 0.6
 
 - Persistent versioned campaign state
 - Core resource controls
@@ -50,6 +50,14 @@ An extension-first solo campaign companion. The application owns campaign state 
 - Equipment-aware armor, shields, and Parrying traits
 - Combat completion returns directly to the exploration procedure
 - Automatic migration of v0.4 campaign saves
+- Character creation opens automatically for fresh campaigns
+- Manual or digital attribute generation using the page 18 formulas
+- Two starting Masteries with Features and Tier 1 Abilities
+- Editable first Domain during character creation
+- Creation validation across attributes, Skills, Resistances, and Masteries
+- Contextual quick-reference drawer with source page numbers
+- Versioned rule-reference registry ready for selective table digitization
+- Automatic migration of v0.5 campaign saves
 
 ## Run
 
