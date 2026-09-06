@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { addFeature, addItem, addRoom, changeItemQuantity, checkTension, enterRoom, equipItem, generateAttributes, hasItem, importCampaign, investigateFeature, inventoryUsage, loadCampaign, log, markImprovementsFromChecks, performCheck, performManualCheck, resolveExplorationRoll, resolveUnknownFeatureInteraction, rollUsageDie, saveCampaign, updateResource, validateCharacterSetup, validatePlaySetup } from "./campaign";
 import type { AttributeRolls, Campaign, CheckMode, Direction, DomainRoom, EquipmentSlot, Item, ItemWeight, ResourceKey, Skill } from "./types";
 import { Combat } from "./Combat";
+import OBR from "@owlbear-rodeo/sdk";
 import { QUICK_RULES } from "./rules";
 import { MASTERY_OPTIONS, RESISTANCE_USES, RESOURCE_USES, SKILL_USES } from "./characterData";
 
+const POPOVER_ID = "com.esortland.ker-nethalas";
 const resourceLabels: Record<ResourceKey, string> = {
   health: "Health", toughness: "Toughness", aether: "Aether", sanity: "Sanity", exhaustion: "Exhaustion",
 };
@@ -84,7 +86,7 @@ export function App() {
   return <main className="app-shell">
     <header className="masthead">
       <div><p className="eyebrow">GRAVEBOUND COMPANION · v0.11</p><h1>{campaign.domainName}</h1><p>{campaign.characterName} · Room {currentRoom.number}</p></div>
-      <div className="save-tools"><span className="saved">◆ Autosaved</span><button disabled={!undoCampaign} onClick={undo}>Undo</button><button onClick={exportSave}>Export</button><label className="import-save">Import<input type="file" accept="application/json,.json" onChange={event=>{void importSave(event.target.files?.[0]);event.currentTarget.value=""}}/></label><button onClick={reset}>New campaign</button></div>
+      <div className="save-tools"><span className="saved">◆ Autosaved</span>{OBR.isAvailable&&<PopoverSizeControls />}<button disabled={!undoCampaign} onClick={undo}>Undo</button><button onClick={exportSave}>Export</button><label className="import-save">Import<input type="file" accept="application/json,.json" onChange={event=>{void importSave(event.target.files?.[0]);event.currentTarget.value=""}}/></label><button onClick={reset}>New campaign</button></div>
     </header>
 
     <section className="resource-bar">
@@ -246,3 +248,13 @@ function Inventory({ campaign, onUpdate }: { campaign: Campaign; onUpdate: (camp
 }
 function itemSlotsLabel(item: Item) { if(item.weight==="none") return "0 slots"; if(item.weight==="light") return `${Math.ceil(item.quantity/10)} slot bundle`; if(item.weight==="coins") return `${Math.ceil(item.quantity/100)} coin slots`; return `${item.quantity*(item.weight==="heavy"?2:1)} slots`; }
 function Journal({ campaign }: { campaign: Campaign }) { return <section className="single-panel panel"><span>EXPEDITION RECORD</span><h2>What the dark remembers</h2><ol className="journal">{campaign.events.map(event => <li key={event.id}><time>{new Date(event.at).toLocaleString()}</time>{event.text}</li>)}</ol></section>; }
+
+function PopoverSizeControls(){
+  const resize=async(widthDelta:number,heightDelta:number)=>{
+    const width=await OBR.popover.getWidth(POPOVER_ID);
+    const height=await OBR.popover.getHeight(POPOVER_ID);
+    await OBR.popover.setWidth(POPOVER_ID,Math.min(1400,Math.max(560,(width??900)+widthDelta)));
+    await OBR.popover.setHeight(POPOVER_ID,Math.min(1200,Math.max(500,(height??800)+heightDelta)));
+  };
+  return <div className="popover-size" aria-label="Owlbear panel size"><span>SIZE</span><button title="Make panel narrower" aria-label="Make panel narrower" onClick={()=>void resize(-120,0)}>↔−</button><button title="Make panel wider" aria-label="Make panel wider" onClick={()=>void resize(120,0)}>↔+</button><button title="Make panel shorter" aria-label="Make panel shorter" onClick={()=>void resize(0,-120)}>↕−</button><button title="Make panel taller" aria-label="Make panel taller" onClick={()=>void resize(0,120)}>↕+</button><button title="Reset panel size" aria-label="Reset panel size" onClick={()=>void (async()=>{await OBR.popover.setWidth(POPOVER_ID,900);await OBR.popover.setHeight(POPOVER_ID,800)})()}>Reset</button></div>;
+}
