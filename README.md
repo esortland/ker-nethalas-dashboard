@@ -2,7 +2,14 @@
 
 An extension-first solo campaign companion. The application owns campaign state and the internal Domain map; Owlbear Rodeo is a host rather than a gameplay dependency.
 
-## Milestone 0.9
+## Milestone 0.10
+
+- Selectable catalog of all 22 Gravebound-era Masteries
+- Short playstyle focus shown before a Mastery is chosen
+- Visible uses for attributes, Skills, and Resistances
+- Tablet-safe character creation flow with deterministic panel order
+- Full-width two-column Skill assignment at Owlbear extension widths
+- Scroll reset when opening an extension tab
 
 - Persistent versioned campaign state
 - Core resource controls
