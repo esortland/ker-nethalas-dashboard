@@ -5,6 +5,8 @@ export type RoomKind = "unknown" | "room" | "corridor" | "lair" | "exit";
 export type ExplorationStep = "shape" | "lair" | "tension" | "encounter" | "event" | "combat" | "ready";
 
 export interface Resource { current: number; max: number }
+export interface AttributeRolls { health: number; toughness: [number, number, number]; aether: number; sanity: number }
+export interface Mastery { id: string; name: string; feature: string; tierOneAbility: string }
 export interface DomainRoom {
   id: string;
   number: number;
@@ -68,7 +70,7 @@ export interface Item {
 }
 
 export interface Campaign {
-  schemaVersion: 5;
+  schemaVersion: 6;
   id: string;
   name: string;
   characterName: string;
@@ -76,6 +78,9 @@ export interface Campaign {
   descentReason: string;
   domainName: string;
   resources: Record<ResourceKey, Resource>;
+  attributesGenerated: boolean;
+  attributeRolls?: AttributeRolls;
+  masteries: [Mastery, Mastery];
   eventDie: 20 | 12 | 10 | 8 | 6 | 4;
   tensionDie: 8 | 6 | 4;
   lairDie: 10 | 8 | 6 | 4;
